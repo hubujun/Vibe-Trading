@@ -118,3 +118,19 @@ bench_report.json
 # Grounding ledger persisted by ad-hoc verification scripts into tests/
 agent/tests/artifacts/
 .idea/*
+
+# ---------------------------------------------------------------------------
+# Fork-local (hubujun): never sent upstream. Kept below the upstream block so
+# `scripts/sync-upstream.sh` only ever conflicts here, never mid-file.
+# ---------------------------------------------------------------------------
+
+# Accidental nested clone of this repo (~1 GB, carries its own .venv)
+/Vibe-Trading/
+
+# unittest.mock artifact: a MagicMock repr leaked into a cache-root path,
+# so the test wrote real parquet files into a literal "MagicMock/" dir.
+/MagicMock/
+
+# Agent/IDE scratch space. NOTE: .scratch/ is deliberately NOT ignored — it
+# holds hand-written specs/tickets that are tracked as part of the fork's work.
+.qoder/
