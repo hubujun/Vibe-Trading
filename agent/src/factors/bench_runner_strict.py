@@ -331,7 +331,7 @@ def run_bench_strict(
 
     Args:
         zoo: Zoo id (e.g. ``alpha101``, ``gtja191``, ``qlib158``, ``academic``).
-        universe: Universe key (``csi300`` / ``sp500`` / ``btc-usdt`` / ...).
+        universe: Universe key (``csi300`` / ``sp500`` / ``crypto`` / ...).
         period: ``YYYY-YYYY`` or ``YYYY-MM-DD/YYYY-MM-DD``.
         random_control: ``True`` builds same-universe random controls per
             alpha (recommended). ``False`` is allowed but **must** be passed

@@ -43,6 +43,7 @@ VALID_SOURCES: set[str] = {
     "baostock",
     "tencent",
     "mootdx",
+    "baidu",
     "ccxt",
     "futu",
     "eastmoney",
@@ -61,6 +62,7 @@ VALID_SOURCES: set[str] = {
     "mt5",
     "tickerall",
     "local",
+    "dune",
     "auto",
 }
 
@@ -105,6 +107,7 @@ def _ensure_registered() -> None:
             "backtest.loaders.baostock_loader",
             "backtest.loaders.tencent_loader",
             "backtest.loaders.mootdx_loader",
+            "backtest.loaders.baidu_loader",
             "backtest.loaders.ccxt_loader",
             "backtest.loaders.futu",
             "backtest.loaders.eastmoney_loader",
@@ -123,6 +126,7 @@ def _ensure_registered() -> None:
             "backtest.loaders.mt5_loader",
             "backtest.loaders.tickerall_loader",
             "backtest.loaders.local_loader",
+            "backtest.loaders.dune_loader",
         ]
         import importlib
 
@@ -178,6 +182,7 @@ FALLBACK_CHAINS: dict[str, list[str]] = {
     "a_share": [
         "tencent",
         "mootdx",
+        "baidu",
         "eastmoney",
         "baostock",
         "akshare",

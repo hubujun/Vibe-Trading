@@ -21,6 +21,14 @@ from typing import Any, Dict, Iterable, List, Literal, Optional
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
+try:
+    from dotenv import load_dotenv
+
+    agent_env = Path(__file__).resolve().parent.parent / ".env"
+    load_dotenv(agent_env)
+except ImportError:
+    pass
+
 from backtest.loaders.registry import (
     FALLBACK_CHAINS,
     LOADER_REGISTRY,

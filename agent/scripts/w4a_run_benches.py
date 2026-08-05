@@ -47,7 +47,7 @@ BENCHES = [
     {"key": "gtja191_csi300", "zoo": "gtja191", "universe": "csi300", "period": "2018-2025"},
     {"key": "alpha101_sp500", "zoo": "alpha101", "universe": "sp500", "period": "2020-2025"},
     {"key": "qlib158_csi300", "zoo": "qlib158", "universe": "csi300", "period": "2020-2025"},
-    {"key": "alpha101_btc", "zoo": "alpha101", "universe": "btc-usdt", "period": "2022-2025"},
+    {"key": "alpha101_btc", "zoo": "alpha101", "universe": "crypto", "period": "2022-2025"},
 ]
 
 

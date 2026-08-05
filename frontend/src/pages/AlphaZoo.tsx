@@ -72,6 +72,14 @@ const ZOO_CARDS: ZooCard[] = [
     id: "fundamental",
     approxCount: 4,
   },
+  {
+    id: "crypto",
+    title: "Crypto On-Chain & Derivatives",
+    description:
+      "Cryptocurrency-native factors — funding rate carry, OI sentiment, on-chain metrics (NVT, MVRV, active addresses, exchange netflow), and market microstructure (amplitude, volume ratio).",
+    approxCount: 9,
+    accent: "from-orange-500/20 to-orange-500/5",
+  },
 ];
 
 // Benchmarkable data universes (bench + compare): each one needs a panel loader
@@ -165,6 +173,15 @@ function BrowseView() {
     selected.size >= 2
       ? `/alpha-zoo/compare?ids=${[...selected].map(encodeURIComponent).join(",")}`
       : "/alpha-zoo/compare";
+
+  const benchHref = (() => {
+    const p = new URLSearchParams();
+    if (zooFilter) p.set("zoo", encodeURIComponent(zooFilter));
+    if (universeFilter) p.set("universe", encodeURIComponent(universeFilter));
+    p.set("period", "2020-2025");
+    const qs = p.toString();
+    return qs ? `/alpha-zoo/bench?${qs}` : "/alpha-zoo/bench";
+  })();
 
   useEffect(() => {
     let alive = true;
@@ -346,7 +363,7 @@ function BrowseView() {
           {selected.size >= 2 ? ` (${selected.size})` : ""}
         </Link>
         <Link
-          to="/alpha-zoo/bench"
+          to={benchHref}
           className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition"
         >
           <Play className="h-3.5 w-3.5" aria-hidden="true" /> {i18n.t("alphaZoo.runBenchmark")}
