@@ -101,10 +101,11 @@ _ALPHA_ID_RE = re.compile(r"^[a-z][a-z0-9]+_[a-z0-9_]{1,64}$")
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 # Filter enums — keep in sync with src.factors.registry.Theme / Universe.
-_VALID_ZOOS = {"alpha101", "gtja191", "qlib158", "academic", "fundamental"}
+_VALID_ZOOS = {"alpha101", "gtja191", "qlib158", "academic", "fundamental", "crypto"}
 _VALID_THEMES = {
     "momentum", "reversal", "volume", "volatility", "quality", "value",
     "liquidity", "microstructure", "sentiment", "growth", "leverage",
+    "carry",
 }
 _VALID_UNIVERSES = {
     "equity_us", "equity_cn", "equity_hk", "equity_in", "equity_kr",
@@ -113,7 +114,7 @@ _VALID_UNIVERSES = {
 # Ranking metrics for /alpha/compare — keep in sync with
 # ``src.factors.compare_runner.SORT_KEYS`` (kept local to avoid a heavy import).
 _VALID_SORTS = {"ir", "ic_mean", "ic_positive_ratio", "ic_count"}
-_BENCH_UNIVERSES = {"csi300", "sp500", "btc-usdt"}
+_BENCH_UNIVERSES = {"csi300", "sp500", "crypto"}
 
 
 def _now_iso() -> str:
@@ -169,6 +170,9 @@ class BenchRequest(BaseModel):
     @field_validator("universe")
     @classmethod
     def _universe_known(cls, v: str) -> str:
+        # btc-usdt is a legacy alias for crypto — normalise it.
+        if v == "btc-usdt":
+            v = "crypto"
         if v not in _BENCH_UNIVERSES:
             raise ValueError(
                 f"unknown universe {v!r}; expected one of {sorted(_BENCH_UNIVERSES)}"
@@ -202,7 +206,10 @@ class CompareRequest(BaseModel):
 
     @field_validator("universe")
     @classmethod
-    def _universe_known(cls, v: str) -> str:
+    def _universe_known_compare(cls, v: str) -> str:
+        # btc-usdt is a legacy alias for crypto — normalise it.
+        if v == "btc-usdt":
+            v = "crypto"
         if v not in _BENCH_UNIVERSES:
             raise ValueError(
                 f"unknown universe {v!r}; expected one of {sorted(_BENCH_UNIVERSES)}"
@@ -399,7 +406,7 @@ def register_alpha_routes(
                 detail=f"unknown theme {theme!r}; expected one of {sorted(_VALID_THEMES)}",
             )
         if universe is not None:
-            _ALIAS = {"csi300": "equity_cn", "sp500": "equity_us", "btc-usdt": "crypto"}
+            _ALIAS = {"csi300": "equity_cn", "sp500": "equity_us", "btc-usdt": "crypto", "crypto": "crypto"}
             universe = _ALIAS.get(universe, universe)
         if universe is not None and universe not in _VALID_UNIVERSES:
             raise HTTPException(

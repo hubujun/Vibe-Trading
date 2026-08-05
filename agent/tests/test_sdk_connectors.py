@@ -500,6 +500,132 @@ def test_okx_service_unconfigured(monkeypatch, tmp_path) -> None:
     assert result["connector"] == "okx"
 
 
+def test_okx_check_status_unconfigured() -> None:
+    """No credentials → configured=False, error_code=credentials_missing."""
+    cfg = ox.OKXConfig(api_key="", api_secret="", passphrase="", profile="paper")
+    report = ox.check_status(config=cfg)
+    assert report["configured"] is False
+    assert report["credential_source"] is None
+    assert report["connection_state"] == "not_configured"
+    assert report["error_code"] == "credentials_missing"
+    assert report["status"] == "error"
+
+
+def test_okx_check_status_credential_source_runtime_file() -> None:
+    """api_key is non-empty → credential_source is 'runtime_file'."""
+    cfg = ox.OKXConfig(api_key="test_key")
+    report = ox.check_status(config=cfg)
+    assert report["credential_source"] == "runtime_file"
+
+
+def test_okx_check_status_credential_source_none() -> None:
+    """api_key is empty → credential_source is None."""
+    cfg = ox.OKXConfig(api_key="")
+    report = ox.check_status(config=cfg)
+    assert report["credential_source"] is None
+
+
+def test_okx_check_status_invalid_flag(monkeypatch) -> None:
+    """Invalid flag → connection_state='error', error_code='credentials_missing'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
+    monkeypatch.setattr(type(cfg), "flag", property(lambda self: "2"))
+    report = ox.check_status(config=cfg)
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "credentials_missing"
+
+
+def test_okx_check_status_sdk_missing(monkeypatch) -> None:
+    """SDK not installed but credentials present → error_code='sdk_missing'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
+    monkeypatch.setattr(ox, "okx_available", lambda: False)
+    report = ox.check_status(config=cfg)
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "sdk_missing"
+
+
+def test_okx_check_status_network_error(monkeypatch) -> None:
+    """ConnectionError → error_code='network_unreachable'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
+
+    def _raise(*_args, **_kwargs):
+        raise ConnectionError("network down")
+
+    monkeypatch.setattr(ox, "get_account_snapshot", _raise)
+    report = ox.check_status(config=cfg)
+    assert report["status"] == "error"
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "network_unreachable"
+    assert report["error"] == "OKX network is unreachable."
+
+
+def test_okx_check_status_auth_error(monkeypatch) -> None:
+    """Auth exception → error_code='authentication_failed'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("authentication failed: invalid token")
+
+    monkeypatch.setattr(ox, "get_account_snapshot", _raise)
+    report = ox.check_status(config=cfg)
+    assert report["status"] == "error"
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "authentication_failed"
+    assert report["error"] == "OKX authentication failed."
+
+
+def test_okx_check_status_broker_error(monkeypatch) -> None:
+    """Generic RuntimeError → error_code='broker_error'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p")
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("something unexpected")
+
+    monkeypatch.setattr(ox, "get_account_snapshot", _raise)
+    report = ox.check_status(config=cfg)
+    assert report["status"] == "error"
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "broker_error"
+    assert report["error"] == "OKX broker request failed."
+
+
+def test_okx_check_status_uid_mismatch(monkeypatch) -> None:
+    """UID mismatch → error_code='broker_error'."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="s", passphrase="p",
+                       expected_uid="1111")
+
+    def _fake_snapshot(*_args, **_kwargs):
+        return {"account": {"total_equity": "10000"}}
+
+    monkeypatch.setattr(ox, "get_account_snapshot", _fake_snapshot)
+
+    class _FakeAccount:
+        def get_account_config(self):
+            return {"code": "0", "data": [{"uid": "2222"}]}
+
+    monkeypatch.setattr(ox, "_account_client", lambda cfg: _FakeAccount())
+    report = ox.check_status(config=cfg)
+    assert report["status"] == "error"
+    assert report["connection_state"] == "error"
+    assert report["error_code"] == "broker_error"
+    assert "1111" in report["error"]
+    assert "2222" in report["error"]
+
+
+def test_okx_check_status_error_message_redacted(monkeypatch) -> None:
+    """Exception containing credential-like text → error message uses fixed text, not raw exception."""
+    cfg = ox.OKXConfig(api_key="k", api_secret="my-secret-pass", passphrase="p")
+
+    def _raise(*_args, **_kwargs):
+        raise RuntimeError("my-secret-pass leaked in error")
+
+    monkeypatch.setattr(ox, "get_account_snapshot", _raise)
+    report = ox.check_status(config=cfg)
+    assert report["error_code"] == "broker_error"
+    # The error message must be the fixed broker_error message, not the raw exception
+    assert "my-secret-pass" not in report["error"]
+    assert report["error"] == "OKX broker request failed."
+
+
 # --------------------------------------------------------------------------- #
 # Binance
 # --------------------------------------------------------------------------- #

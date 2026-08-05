@@ -48,6 +48,39 @@ from src.config.accessor import get_env_config
 
 logger = logging.getLogger(__name__)
 
+# Track whether the Dune API key missing warning has been issued this process
+# lifetime to avoid spamming the user on repeated calls.
+_dune_key_warned = False
+
+
+def _warn_dune_key_missing_once() -> None:
+    """Emit a user-visible warning when DUNE_API_KEY is not configured.
+
+    Prints guidance once per process lifetime (first-call only); subsequent
+    calls are silent to avoid noise on repeated panel loads.
+    """
+    global _dune_key_warned
+    if _dune_key_warned:
+        return
+    _dune_key_warned = True
+
+    msg = (
+        "⚠️  Dune Analytics 链上数据不可用 — 缺少 DUNE_API_KEY 环境变量\n"
+        "\n"
+        "   链上因子（MVRV / NVT / Exchange Netflow / Active Addresses）将跳过。\n"
+        "   如需启用，请按以下步骤获取 Dune API Key：\n"
+        "\n"
+        "   1. 注册 Dune 账号 → https://dune.com\n"
+        "   2. 进入 Settings → API → 创建 API Key\n"
+        "      直达链接: https://dune.com/settings/api\n"
+        "   3. 设置环境变量:\n"
+        "\n"
+        "         export DUNE_API_KEY=\"你的密钥\"\n"
+        "\n"
+        "   参考文档: https://docs.dune.com/api-reference/\n"
+    )
+    logger.warning(msg)
+
 # Date the SP500 constituent list was sampled from Wikipedia (best-effort label
 # for the survivorship-bias warning in the bench summary's ``meta`` block).
 _SP500_CONSTITUENT_SOURCE_DATE = "2026-05-17"
@@ -56,9 +89,35 @@ _SP500_CONSTITUENT_SOURCE_DATE = "2026-05-17"
 # the alphas already have, but reported as industry neutralization.
 _SP500_MIN_SECTOR_COVERAGE = 0.9
 
+# ---------------------------------------------------------------------------
+# Cache schema versioning: when the column set of a panel builder changes
+# (e.g. _load_crypto_panel adds funding_rate / onchain:* columns), bump the
+# corresponding version constant. Stale caches from prior versions are
+# automatically invalidated and rebuilt — no manual cache deletion needed.
+# ---------------------------------------------------------------------------
+
+_PANEL_SCHEMA_KEY = "_panel_schema_v"
+_CRYPTO_PANEL_SCHEMA_VERSION = 2  # v1: OHLCV only; v2: +funding_rate, +oi, +onchain:*
+
 # Concurrent Tushare ``pro.daily`` fetches when building CSI300. Free tier
 # allows ~200 calls/min; 4 workers stays well under that with a 300-name list.
 _CSI300_FETCH_WORKERS = 4
+
+# Default crypto symbol list for multi-asset cross-sectional IC. Override with
+# the ``CRYPTO_SYMBOLS`` environment variable (comma-separated OKX instIds,
+# e.g. ``BTC-USDT,ETH-USDT,SOL-USDT``).
+_CRYPTO_SYMBOLS_DEFAULT = [
+    "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT",
+    "XRP-USDT", "DOGE-USDT", "ADA-USDT", "AVAX-USDT",
+]
+
+
+def _crypto_symbols() -> list[str]:
+    """Return the crypto symbol list from env or the built-in default."""
+    env_val = os.getenv("CRYPTO_SYMBOLS", "").strip()
+    if env_val:
+        return [s.strip() for s in env_val.split(",") if s.strip()]
+    return list(_CRYPTO_SYMBOLS_DEFAULT)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +133,7 @@ _UNIVERSE_TAG = {
     "csi300": "equity_cn",
     "sp500": "equity_us",
     "btc-usdt": "crypto",
+    "crypto": "crypto",
 }
 
 
@@ -100,15 +160,16 @@ def _parse_period(period: str) -> tuple[str, str]:
 
 def _load_universe_panel(
     universe: str, period: str, *, use_cache: bool = True
-) -> dict[str, pd.DataFrame]:
+) -> dict[str, Any]:
     """Load OHLCV(+amount, +vwap) wide panel for the requested universe.
 
     Returns a dict keyed by panel column (open/high/low/close/volume/amount/vwap)
     where each value is a wide ``pd.DataFrame`` indexed by date (DatetimeIndex)
-    with one column per instrument.
+    with one column per instrument.  May also contain non-DataFrame metadata
+    keys (e.g. ``_panel_schema_v``).
 
     Args:
-        universe: ``csi300`` | ``sp500`` | ``btc-usdt``.
+        universe: ``csi300`` | ``sp500`` | ``crypto`` (``btc-usdt`` accepted as alias).
         period: ``YYYY-YYYY`` or ``YYYY-MM-DD/YYYY-MM-DD``.
         use_cache: When True (default) reuse a pickle in
             ``~/.vibe-trading/cache/`` if the same universe+period was fetched
@@ -129,15 +190,22 @@ def _load_universe_panel(
     if use_cache and cache_path.is_file():
         cached = _read_pickle_cache(cache_path)
         if cached is not None:
-            logger.info("universe %s: loaded from cache %s", universe, cache_path)
-            return cached
+            schema_v = cached.get(_PANEL_SCHEMA_KEY, 0)
+            if universe in ("btc-usdt", "crypto") and schema_v < _CRYPTO_PANEL_SCHEMA_VERSION:
+                logger.info(
+                    "universe %s: cached panel schema v%d < v%d; refetching",
+                    universe, schema_v, _CRYPTO_PANEL_SCHEMA_VERSION,
+                )
+            else:
+                logger.info("universe %s: loaded from cache %s", universe, cache_path)
+                return cached
 
     if universe == "csi300":
         panel = _load_csi300_panel(start, end)
     elif universe == "sp500":
         panel = _load_sp500_panel(start, end)
-    elif universe == "btc-usdt":
-        panel = _load_btc_panel(start, end)
+    elif universe in ("btc-usdt", "crypto"):
+        panel = _load_crypto_panel(start, end)
     else:  # pragma: no cover — guarded above
         raise ValueError(f"unhandled universe {universe!r}")
 
@@ -145,17 +213,6 @@ def _load_universe_panel(
         raise RuntimeError(
             f"universe {universe!r} produced empty panel for {start}..{end}; "
             "check network / token / date range"
-        )
-
-    # btc-usdt loader returns a single-column close (one instrument). Cross-
-    # sectional IC needs >= 2 instruments — short-circuit with a clean error
-    # that propagates to API (400) and CLI.
-    close_df = panel["close"]
-    if universe == "btc-usdt" and close_df.shape[1] < 2:
-        raise ValueError(
-            "btc-usdt is single-asset; cross-sectional IC needs >=2 instruments. "
-            "Use a multi-symbol crypto basket (e.g. multiple OKX pairs) for "
-            "meaningful results."
         )
 
     if use_cache:
@@ -601,16 +658,177 @@ def _fetch_sp500_constituents() -> tuple[list[str], dict[str, str]]:
     return [], {}
 
 
-def _load_btc_panel(start: str, end: str) -> dict[str, pd.DataFrame]:
-    """Single-instrument BTC-USDT panel via OKX. Adds vwap = typical price."""
+def _load_oi_with_fallback(
+    okx: Any, codes: list[str], start: str, end: str
+) -> pd.DataFrame | None:
+    """Load OI panel preferring CCXT history, with snapshot gap-fill only.
+
+    Strategy:
+    1. Try ``fetch_open_interest_history()`` (CCXT, ~30d historical daily OI).
+    2. If that succeeds, also fetch the current snapshot and fill any dates
+       beyond the history range with the latest snapshot value.
+    3. If history fails entirely for a symbol, do NOT include the symbol at
+       all — a single snapshot forward-filled to the full date range produces
+       all-zero IC series that silently degrades signal quality (LAO-47).
+    """
+    # --- Phase 1: historical OI via CCXT ---
+    oi_history: dict[str, pd.DataFrame] = {}
+    try:
+        oi_history = okx.fetch_open_interest_history(codes, start, end)
+    except Exception as exc:
+        logger.debug("OI history fetch via CCXT failed: %s — falling back to snapshot", exc)
+
+    # --- Phase 2: snapshot for gap-fill only (not as standalone data source) ---
+    oi_snapshot: dict[str, pd.DataFrame] = {}
+    try:
+        oi_snapshot = okx.fetch_open_interest(codes, start, end)
+    except Exception as exc:
+        logger.debug("OI snapshot fetch failed: %s", exc)
+
+    if not oi_history and not oi_snapshot:
+        return None
+
+    # --- Merge: history wins, snapshot fills gaps only ---
+    end_dt = pd.Timestamp(end)
+    merged: dict[str, pd.DataFrame] = {}
+
+    for code in codes:
+        hist_df = oi_history.get(code)
+        snap_df = oi_snapshot.get(code)
+
+        if hist_df is not None and not hist_df.empty:
+            if snap_df is not None and not snap_df.empty:
+                # Fill dates after the last history date with snapshot value
+                latest_oi = snap_df["oi"].iloc[-1] if "oi" in snap_df.columns else None
+                if latest_oi is not None:
+                    last_hist_date = hist_df.index.max()
+                    gap_dates = pd.date_range(
+                        last_hist_date + pd.Timedelta(days=1), end_dt, freq="D"
+                    )
+                    if len(gap_dates) > 0:
+                        gap_df = pd.DataFrame(
+                            {"oi": float(latest_oi), "oi_timestamp": gap_dates},
+                            index=gap_dates,
+                        )
+                        gap_df.index.name = "trade_date"
+                        hist_df = pd.concat([hist_df, gap_df])
+                        hist_df = hist_df[~hist_df.index.duplicated(keep="first")].sort_index()
+            merged[code] = hist_df
+        # NOTE: snapshot-only code paths are intentionally omitted here.
+        # A single snapshot forward-filled to all dates produces zero-change
+        # OI for every bar, which yields empty IC series — worse than a clean
+        # SkipAlpha with a readable diagnostic.  See LAO-47 / LAO-45.
+
+    if not merged:
+        return None
+    return _wide_from_single_column(merged, "oi")
+
+
+def _load_crypto_panel(start: str, end: str) -> dict[str, Any]:
+    """Multi-instrument crypto OHLCV + funding rate + OI panel via OKX.
+
+    Loads the configured symbol list (``CRYPTO_SYMBOLS`` env var or the 8-symbol
+    default) and returns wide panels keyed by field (open/high/low/close/volume/vwap).
+    Also attaches ``funding_rate`` and ``oi`` from the OKX loader when available.
+
+    The returned dict may contain non-DataFrame values such as
+    ``_panel_schema_v`` (int) for cache invalidation.
+    """
+    from backtest.loaders.okx import DataLoader as OkxLoader
     from backtest.loaders.registry import resolve_loader
 
+    codes = _crypto_symbols()
     loader = resolve_loader("crypto")
-    fetched = _retry(lambda: loader.fetch(["BTC-USDT"], start, end)) or {}
-    panel = _wide_from_fetched(fetched, include_amount=False)
+    fetched = _retry(lambda: loader.fetch(codes, start, end)) or {}
+    panel = _wide_from_fetched(fetched, include_amount=True)
     if all(k in panel for k in ("open", "high", "low", "close")):
         panel["vwap"] = (panel["open"] + panel["high"] + panel["low"] + panel["close"]) / 4.0
+
+    # --- Attach funding_rate and oi from OKX (Step 2) ---
+    try:
+        okx = OkxLoader()
+        # Funding rate
+        fr_data = okx.fetch_funding_rate(codes, start, end)
+        if fr_data:
+            fr_panel = _wide_from_single_column(fr_data, "funding_rate")
+            if fr_panel is not None and not fr_panel.empty:
+                panel["funding_rate"] = fr_panel
+        # Open interest — prefer CCXT history, fall back to snapshot
+        oi_panel = _load_oi_with_fallback(okx, codes, start, end)
+        if oi_panel is not None and not oi_panel.empty:
+            panel["oi"] = oi_panel
+    except Exception as exc:
+        logger.warning("failed to attach funding_rate / oi to crypto panel: %s", exc)
+
+    # --- Attach onchain:* metrics from Dune (ADR-002 Phase 2) ---
+    try:
+        # Ensure .env is loaded so DUNE_API_KEY is available in os.environ.
+        # The bench runner / scripts may not have gone through the full server
+        # startup path which normally calls _ensure_dotenv().
+        try:
+            from src.providers.llm import _ensure_dotenv as _load_dotenv
+
+            _load_dotenv()
+        except Exception:
+            pass  # best-effort — fall back to whatever os.environ already has
+
+        from backtest.loaders.dune_loader import DuneLoader
+
+        dune = DuneLoader()
+        if dune.is_available():
+            onchain_metrics = ["mvrv", "exchange_netflow", "active_addresses", "nvt"]
+            for metric in onchain_metrics:
+                try:
+                    frame = dune.fetch_metric(metric, codes, start, end)
+                    if frame is not None and not frame.empty:
+                        panel[f"onchain:{metric}"] = frame
+                except Exception as exc:
+                    logger.warning(
+                        "failed to attach onchain metric %s to crypto panel: %s",
+                        metric, exc,
+                    )
+        else:
+            _warn_dune_key_missing_once()
+    except Exception as exc:
+        logger.warning("failed to attach onchain metrics to crypto panel: %s", exc)
+
+    # Only mark as v2 when at least one extended-data field actually loaded.
+    # If funding_rate / oi / onchain:* all failed (API issues / rate limits /
+    # expired Dune credits), the panel is effectively v1 and should not be
+    # cached under v2 — otherwise the schema guard lets a stale v2-tagged
+    # cache persist forever while every factor that needs the missing fields
+    # skips silently (LAO-45).
+    has_extended = (
+        "funding_rate" in panel
+        or "oi" in panel
+        or any(k.startswith("onchain:") for k in panel)
+    )
+    panel[_PANEL_SCHEMA_KEY] = (
+        _CRYPTO_PANEL_SCHEMA_VERSION if has_extended else 1
+    )
     return panel
+
+
+def _wide_from_single_column(
+    fetched: dict[str, pd.DataFrame], column: str
+) -> pd.DataFrame | None:
+    """Stack per-code single-column frames into a wide DataFrame."""
+    if not fetched:
+        return None
+    all_dates = sorted(set().union(*(df.index for df in fetched.values())))
+    if not all_dates:
+        return None
+    all_codes = sorted(fetched.keys())
+    date_index = pd.DatetimeIndex(all_dates)
+    present = {}
+    for code, df in fetched.items():
+        if column in df.columns:
+            present[code] = df[column]
+    if not present:
+        return None
+    wide = pd.concat(present, axis=1)
+    wide = wide.reindex(index=date_index, columns=all_codes)
+    return wide.astype(float)
 
 
 def _wide_from_fetched(
@@ -1088,7 +1306,7 @@ class AlphaBenchTool(BaseTool):
             },
             "universe": {
                 "type": "string",
-                "description": "csi300 | sp500 | btc-usdt (resolved via existing data tools).",
+                "description": "csi300 | sp500 | crypto (resolved via existing data tools; btc-usdt accepted as alias).",
             },
             "period": {
                 "type": "string",
