@@ -6,7 +6,7 @@
 
 基于 [HKUDS/Vibe-Trading](https://github.com/HKUDS/Vibe-Trading) 的量化交易研究平台二次开发。自然语言驱动的 AI 金融研究 agent + 回测系统。重点开发 OKX broker connector、交易策略引擎、多 Agent 协作框架。
 
-- **上游**：HKUDS/Vibe-Trading v0.1.12
+- **上游**：HKUDS/Vibe-Trading v0.1.13
 - **Fork**：hubujun/Vibe-Trading
 - **技术栈**：Python 3.11+ / FastAPI (8899) / Vue 3 + Vite (5899) / Docker Compose
 - **测试**：pytest（`agent/tests/`）
@@ -85,6 +85,38 @@ Vibe-Trading/
 | **check_connection()** | 服务层的连接检查，委托给 profile 对应的 SDK | `service.py:40` |
 | **BrokerAuthState** | API 层的经纪人认证状态快照 | `live_routes.py:95`，所有字段经过白名单验证 |
 | **_closed_vocabulary()** | 安全边界函数，只允许白名单值通过 | `live_routes.py:249` |
+
+## 上游同步机制
+
+上游 HKUDS/Vibe-Trading **会重写已发布历史**（对 `main` 强制推送）。2026-08-05 同步时，
+`git fetch` 报告 upstream 独有 1187 个提交、本地"独有"1036 个——而本 fork 当时
+**没有任何自己的提交**，那 1036 个全部是 SHA 被改写的上游提交。因此禁止用 merge/pull 同步。
+
+分支职责严格切分：
+
+| 分支 | 职责 |
+|---|---|
+| `main` | upstream/main 的**精确镜像**。禁止在此提交，因此永远可以安全 `reset --hard` |
+| `dev/local-work` | 本地全部提交，每次同步 rebase 到镜像之上 |
+
+**不变式**：`dev/local-work` 始终基于 `main` 的当前顶点。这是能用 `rebase --onto`
+只重放本地提交的前提；直接 `git rebase main` 会退回 2026-04 的真实 merge base，
+把上游自己改写过的提交重放一遍。
+
+```bash
+DRY_RUN=1 scripts/sync-upstream.sh   # 先看会发生什么
+scripts/sync-upstream.sh             # 同步 + 重放本地提交
+```
+
+脚本会在 rebase 前打 `sync-backup/<时间戳>` 标签作为回滚点，并在工作区不干净或
+不变式被破坏时拒绝执行。
+
+### 已知本地环境问题
+
+`frontend` 有 31 个测试失败（`localStorage.clear is not a function`），**与同步无关**：
+在干净的上游 commit 上同样复现。根因是 Node 25 原生暴露了 `localStorage` 全局对象，
+遮蔽了 jsdom 的实现，而未提供 `--localstorage-file` 时其 `clear` 为 `undefined`。
+项目 `engines` 与 CI 均要求 Node 22 —— 用 Node 22 运行前端测试即可。
 
 ## 架构决策记录
 
