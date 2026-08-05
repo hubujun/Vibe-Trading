@@ -117,7 +117,7 @@ One-line cross-sectional IC / IR / alive-reversed-dead categorisation across six
 - **gtja191** (191 alphas) — Guotai Junan 2014 "191 Short-period Trading Alpha Factors" research report.
 - **academic** (12 factors) — Fama-French 5 + Carhart momentum + Jegadeesh reversal + George-Hwang 52-week-high + Amihud illiquidity + Harvey-Siddique skew + Frazzini-Pedersen betting-against-beta (price-based proxies) + a correlation-rewiring stability score (from the in-repo correlation-regime skill).
 - **fundamental** (4 factors) — PIT-safe earnings yield, ROE, gross profitability, and asset growth from daily fundamental panels.
-- **crypto** (5 factors) — Funding rate (carry), OI change & OI-price divergence (sentiment), volume ratio, and intraday amplitude (volatility) for perpetual swap markets.
+- **crypto** (9 factors) — Derivatives signals: funding rate (carry), OI change & OI-price divergence (sentiment), volume ratio and intraday amplitude (volatility) for perpetual swap markets; plus on-chain valuation and flow: NVT ratio, MVRV z-score, active addresses, and exchange netflow (sourced via the `dune` loader).
 
 Each alpha ships with `__alpha_meta__` (formula LaTeX + theme + universe + warmup + columns required), guarded by an AST purity gate + 300-row lookahead sentinel test. Use the `vibe-trading alpha {list,show,bench,compare,export-manifest}` CLI, the `/alpha/*` REST routes (browser at `/alpha-zoo`), or compose multi-factor signals via `ZooSignalEngine.from_zoo(...)`.
 
