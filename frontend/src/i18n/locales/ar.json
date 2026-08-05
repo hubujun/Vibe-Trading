@@ -1021,14 +1021,16 @@
       "alpha101": "Kakushadze 101 ألفا صيغية",
       "gtja191": "GTJA 191",
       "academic": "الشذوذات الأكاديمية",
-      "fundamental": "أساسيات آمنة PIT"
+      "fundamental": "أساسيات آمنة PIT",
+      "crypto": "عوامل الكريبتو على السلسلة والمشتقات"
     },
     "zooCardDesc": {
       "qlib158": "مكتبة Microsoft Qlib الكاملة ذات 158 ميزة تغطي الزخم والتذبذب والحجم والإشارات الإحصائية المتحركة.",
       "alpha101": "101 إشارة ألفا صيغية من Kakushadze (2015)؛ إشارات عرضية قصيرة المدى.",
       "gtja191": "191 ألفا من Guotai Junan Securities؛ إشارات فنية وبنية مجهرية مضبوطة لأسواق الأسهم الصينية A.",
       "academic": "شذوذات طويلة المدى منسقة من الأدبيات الأكاديمية (القيمة، الزخم، الجودة، التذبذب المنخفض، إلخ).",
-      "fundamental": "عوامل الجودة والقيمة محسوبة من بيانات SEC company facts الآمنة PIT — earnings yield وROE وgross profitability وasset growth (مثبّتة على filed-date)."
+      "fundamental": "عوامل الجودة والقيمة محسوبة من بيانات SEC company facts الآمنة PIT — earnings yield وROE وgross profitability وasset growth (مثبّتة على filed-date).",
+      "crypto": "عوامل أصلية للعملات المشفرة — حمل معدل التمويل، ومعنويات الفائدة المفتوحة، ومقاييس على السلسلة (NVT، MVRV، العناوين النشطة، التدفق الصافي للمنصات)، وبنية السوق الدقيقة (السعة، نسبة الحجم)."
     },
     "universeOption": {
       "csi300": "CSI 300 (الصين A)",
