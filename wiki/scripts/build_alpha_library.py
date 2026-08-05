@@ -115,6 +115,10 @@ _ZOO_DISPLAY: dict[str, dict[str, str]] = {
             "sees a number before it was published."
         ),
     },
+    "crypto": {
+        "name": "Crypto On-Chain & Derivatives",
+        "tagline": "Cryptocurrency-native factors — funding rate carry, OI sentiment, exchange flows, on-chain valuation, and derivatives microstructure.",
+    },
 }
 
 
