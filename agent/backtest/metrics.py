@@ -41,6 +41,10 @@ _TRADING_DAYS = {
     "india_broker": 252,
     # Korean equity (KRX)
     "pykrx": 252,
+    # A-share equity, daily bars only (loader rejects intraday intervals)
+    "baidu": 252,
+    # Crypto on-chain metrics (Dune) — daily point values, no intraday
+    "dune": 365,
 }
 # mt5 is a forex/CFD feed: 24x5 sessions → 260 trading days, 24h intraday bars.
 # US equity (yfinance-style): 6.5h sessions → 390 1m bars/day.
@@ -51,6 +55,9 @@ _TRADING_DAYS = {
 # serves daily bars only, so the intraday rows exist to keep the table complete
 # (and correct if KRX intraday ever arrives under this key), not because pykrx
 # can return them.
+# baidu (A-share) and dune (on-chain) are daily-only by construction — both
+# loaders reject intraday intervals outright — so they appear in the "1D" layer
+# only. Inventing intraday rows for them would describe bars that cannot exist.
 _BARS_PER_DAY = {
     #  --- US/international equity (6.5h session) ---
     "1m":  {"yfinance": 390, "yahoo": 390, "finnhub": 390, "alphavantage": 390,
@@ -127,6 +134,8 @@ _BARS_PER_DAY = {
             "mt5": 1, "tickerall": 1,
             "india_broker": 1,
             "pykrx": 1,
+            "baidu": 1,
+            "dune": 1,
             },
 }
 
