@@ -162,7 +162,7 @@ class TestFallbackChains:
         """Equity chains lead with throttle-tolerant public sources and trail
         with key-gated REST fallbacks, in the exact reviewed order."""
         assert FALLBACK_CHAINS["a_share"] == [
-            "tencent", "mootdx", "eastmoney", "baostock", "akshare", "tushare", "local",
+            "tencent", "mootdx", "baidu", "eastmoney", "baostock", "akshare", "tushare", "local",
         ]
         assert FALLBACK_CHAINS["us_equity"] == [
             "yahoo", "stooq", "sina", "eastmoney", "yfinance", "tiingo", "fmp",

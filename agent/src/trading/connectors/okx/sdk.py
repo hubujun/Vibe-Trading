@@ -191,8 +191,14 @@ def check_status(config: OKXConfig | None = None) -> dict[str, Any]:
     queried (best effort) and a UID mismatch is reported as an error.
     """
     cfg = config or load_config()
+    configured = not _missing_fields(cfg)
+    credential_source = "runtime_file" if cfg.api_key else None
     report: dict[str, Any] = {
         "status": "ok",
+        "configured": configured,
+        "credential_source": credential_source,
+        "connection_state": "connected",
+        "error_code": None,
         "config": _public_config(cfg),
         "sdk": {"package": "python-okx", "installed": okx_available()},
         "paper_guard": "header_flag+uid_pin",
@@ -200,27 +206,26 @@ def check_status(config: OKXConfig | None = None) -> dict[str, Any]:
     }
 
     if cfg.flag not in ("0", "1"):
-        report["status"] = "error"
-        report["error"] = f"invalid OKX flag {cfg.flag!r}; expected '0' (live) or '1' (demo)."
+        report.update(
+            status="error",
+            connection_state="error",
+            error_code="credentials_missing",
+            error=f"invalid OKX flag {cfg.flag!r}; expected '0' (live) or '1' (demo).",
+        )
         return report
 
     missing = _missing_fields(cfg)
     if missing:
-        report["status"] = "error"
-        report["error"] = f"OKX connector not configured: missing {', '.join(missing)}."
-        return report
+        return _status_error(report, "credentials_missing", f"OKX connector not configured: missing {', '.join(missing)}.")
 
     if not report["sdk"]["installed"]:
-        report["status"] = "error"
-        report["error"] = "Optional dependency missing: install with `pip install python-okx`."
-        return report
+        return _status_error(report, "sdk_missing", "Optional dependency missing: install with `pip install python-okx`.")
 
     try:
         snapshot = get_account_snapshot(cfg)
-    except Exception as exc:  # noqa: BLE001 - health endpoint reports cleanly
-        report["status"] = "error"
-        report["error"] = str(exc)
-        return report
+    except Exception as exc:  # noqa: BLE001 - health endpoint reports safe codes
+        code = _connection_error_code(exc)
+        return _status_error(report, code, _connection_error_message(code))
 
     uid = None
     if cfg.expected_uid:
@@ -230,9 +235,7 @@ def check_status(config: OKXConfig | None = None) -> dict[str, Any]:
             rows = _extract_data(resp)
             uid = _first(rows[0], ("uid",)) if rows else None
             if uid is not None and str(uid) != cfg.expected_uid:
-                report["status"] = "error"
-                report["error"] = f"UID mismatch: expected {cfg.expected_uid}, broker returned {uid}."
-                return report
+                return _status_error(report, "broker_error", f"UID mismatch: expected {cfg.expected_uid}, broker returned {uid}.")
         except Exception as exc:  # noqa: BLE001 - uid pinning is best effort
             report["uid_check"] = {"ok": False, "error": str(exc)}
 
@@ -613,6 +616,37 @@ def _market_client(cfg: OKXConfig):
     from okx.MarketData import MarketAPI  # type: ignore
 
     return MarketAPI(cfg.api_key, cfg.api_secret, cfg.passphrase, False, cfg.flag, domain=cfg.host)
+
+
+def _status_error(report: dict[str, Any], code: str, message: str) -> dict[str, Any]:
+    """Update a status report for a known error code, fixing connection_state."""
+    report.update(
+        status="error",
+        connection_state=(
+            "not_configured" if code == "credentials_missing" else "error"
+        ),
+        error_code=code,
+        error=message,
+    )
+    return report
+
+
+def _connection_error_code(exc: Exception) -> str:
+    """Map a broker/network exception to a stable, redaction-safe error code."""
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return "network_unreachable"
+    text = type(exc).__name__.lower() + " " + str(exc).lower()
+    if any(token in text for token in ("auth", "token", "permission", "unauthorized")):
+        return "authentication_failed"
+    return "broker_error"
+
+
+def _connection_error_message(code: str) -> str:
+    return {
+        "authentication_failed": "OKX authentication failed.",
+        "network_unreachable": "OKX network is unreachable.",
+        "broker_error": "OKX broker request failed.",
+    }[code]
 
 
 def _missing_fields(cfg: OKXConfig) -> list[str]:

@@ -249,5 +249,11 @@ position sizing controlled and avoid leverage.
 3. **UTXO vs account model**: BTC (UTXO) analysis methods cannot be directly applied to ETH (account model)
 4. **Missing Layer-2 data**: many transactions occur on L2s (Arbitrum / Optimism), so L1 data is incomplete
 5. **On-chain data lag**: block confirmation takes time, so this is not suitable for short-term trading decisions
-6. **Data acquisition**: the built-in OKX data source provides candles / trade data, but on-chain data requires extra APIs (Glassnode / Nansen)
-7. **Metric desensitization**: as market structure changes (ETFization / institutionalization), historical thresholds may need adjustment
+6. **Data availability (ADR-002)**: on-chain metrics are now programmatically accessible as alpha factor inputs:
+   - `onchain:mvrv` — MVRV ratio, loaded via Dune Analytics (free tier, ~15min delay)
+   - `onchain:exchange_netflow` — exchange net inflow/outflow, via Dune
+   - `onchain:active_addresses` — daily active addresses, via Dune
+   - `onchain:nvt` — NVT ratio, via Dune
+   - SOPR requires Glassnode Pro ($29/month); not yet auto-loaded
+7. **Setup**: set `DUNE_API_KEY` env var to enable onchain data. See `docs/adr/adr-002-crypto-onchain-data-source.md` for full architecture.
+8. **Metric desensitization**: as market structure changes (ETFization / institutionalization), historical thresholds may need adjustment

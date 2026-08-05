@@ -2,11 +2,12 @@
 
 Strategy: for each registered alpha,
 
-1. Build a synthetic OHLCV+volume+amount panel (300 rows × 10 symbols,
+1. Build a synthetic OHLCV+volume+amount panel (450 rows × 10 symbols,
    reproducible random walk). The panel is long enough to cover the
-   longest production windows we ship (≤252d for academic + Kakushadze).
+   longest production windows we ship (≤365d for crypto MVRV Z-Score
+   and ≤252d for academic + Kakushadze).
 2. Compute the factor on the baseline panel and snapshot the value at
-   ``probe_t = 260`` (well past warmup for any ≤252d window, well before
+   ``probe_t = 380`` (well past warmup for any ≤365d window, well before
    the perturbation).
 3. Corrupt every panel column from row ``probe_t + 10`` onwards (NaN or
    absurd ``1e10`` values) and recompute.
@@ -34,10 +35,10 @@ from src.factors.registry import Registry, RegistryError, SkipAlpha
 # ---------------------------------------------------------------- constants
 
 
-N_ROWS = 300
+N_ROWS = 450
 N_SYMS = 10
-PROBE_T = 260           # row whose value must be invariant under future edits
-PERTURB_FROM = 270      # first row to corrupt (strictly > PROBE_T)
+PROBE_T = 380           # row whose value must be invariant under future edits
+PERTURB_FROM = 390      # first row to corrupt (strictly > PROBE_T)
 PERTURB_VALUE = 1e10    # sentinel; alternates with NaN per column
 
 
@@ -80,6 +81,50 @@ def _baseline_panel(seed: int = 0) -> dict[str, pd.DataFrame]:
     amount = volume * close
     vwap = (high + low + close + open_) / 4.0
 
+    # --- crypto-specific columns needed by crypto zoo alphas ----------
+    # Use a separate RNG with a derived seed so the addition of these
+    # columns does not alter the existing OHLCV random walk used by
+    # stock alphas (bit-level reproducibility for those is preserved).
+    crypto_rng = np.random.default_rng(seed + 10_000)
+
+    # funding_rate: small daily values oscillating around zero (~-0.1% to +0.1%)
+    funding_rate = pd.DataFrame(
+        crypto_rng.normal(0.0, 0.0005, size=(N_ROWS, N_SYMS)),
+        index=idx, columns=cols,
+    )
+
+    # oi (open interest): random walk from 1e6
+    oi_log_rets = crypto_rng.normal(0.0, 0.02, size=(N_ROWS, N_SYMS))
+    oi = pd.DataFrame(
+        1e6 * np.exp(np.cumsum(oi_log_rets, axis=0)),
+        index=idx, columns=cols,
+    )
+
+    # onchain:mvrv — mean-reverting around 2.5, clipped to [0.5, 8]
+    mvrv = pd.DataFrame(
+        crypto_rng.normal(2.5, 1.0, size=(N_ROWS, N_SYMS)).clip(0.5, 8),
+        index=idx, columns=cols,
+    )
+
+    # onchain:exchange_netflow — zero-mean, range approx -1e6 .. +1e6
+    exchange_netflow = pd.DataFrame(
+        crypto_rng.normal(0.0, 5e5, size=(N_ROWS, N_SYMS)),
+        index=idx, columns=cols,
+    )
+
+    # onchain:active_addresses — random walk from 500k
+    addr_log_rets = crypto_rng.normal(0.0, 0.01, size=(N_ROWS, N_SYMS))
+    active_addresses = pd.DataFrame(
+        500_000 * np.exp(np.cumsum(addr_log_rets, axis=0)),
+        index=idx, columns=cols,
+    )
+
+    # onchain:nvt — log-normal around 80, clipped to [10, 300]
+    nvt = pd.DataFrame(
+        crypto_rng.lognormal(mean=4.2, sigma=0.6, size=(N_ROWS, N_SYMS)).clip(10, 300),
+        index=idx, columns=cols,
+    )
+
     return {
         "open": open_,
         "high": high,
@@ -88,6 +133,12 @@ def _baseline_panel(seed: int = 0) -> dict[str, pd.DataFrame]:
         "volume": volume,
         "amount": amount,
         "vwap": vwap,
+        "funding_rate": funding_rate,
+        "oi": oi,
+        "onchain:mvrv": mvrv,
+        "onchain:exchange_netflow": exchange_netflow,
+        "onchain:active_addresses": active_addresses,
+        "onchain:nvt": nvt,
     }
 
 
