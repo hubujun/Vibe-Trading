@@ -113,10 +113,21 @@ scripts/sync-upstream.sh             # 同步 + 重放本地提交
 
 ### 已知本地环境问题
 
-`frontend` 有 31 个测试失败（`localStorage.clear is not a function`），**与同步无关**：
-在干净的上游 commit 上同样复现。根因是 Node 25 原生暴露了 `localStorage` 全局对象，
-遮蔽了 jsdom 的实现，而未提供 `--localstorage-file` 时其 `clear` 为 `undefined`。
-项目 `engines` 与 CI 均要求 Node 22 —— 用 Node 22 运行前端测试即可。
+`frontend` 曾因 Node 25 有 31 个测试失败（`localStorage.clear is not a function`）：
+Node 25 原生暴露了 `localStorage` 全局对象，遮蔽了 jsdom 的实现，而未提供
+`--localstorage-file` 时其 `clear` 为 `undefined`。项目 `engines` 与 CI 均要求
+Node 22。
+
+**已解决**：Node 22.23.2 已安装到 `~/.local/node22`（官方二进制，独立于 brew；
+brew 的 node@22 因 bottle tab 解析损坏暂不可用）。用它运行前端命令：
+
+```bash
+PATH="$HOME/.local/node22/bin:$PATH" npx vitest run   # 398 passed
+PATH="$HOME/.local/node22/bin:$PATH" npx tsc --noEmit
+```
+
+`~/.local/node22` 不在 PATH 中，默认 shell 仍用 brew 的 Node 25；上述两行是
+日常用法，也可自行把 PATH 前缀写进 `~/.zshrc`。
 
 ## 架构决策记录
 
