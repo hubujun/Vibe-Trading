@@ -57,9 +57,10 @@ Theme = Literal[
     "sentiment",
     "growth",
     "leverage",
+    "carry",
 ]
 
-_PRICE_COLS = {"open", "high", "low", "close", "volume", "vwap", "amount"}
+_PRICE_COLS = {"open", "high", "low", "close", "volume", "vwap", "amount", "funding_rate", "oi"}
 
 PanelColumn = str
 
@@ -73,13 +74,16 @@ def validate_columns_required(cols: list[str]) -> None:
         cols: Declared panel columns from ``__alpha_meta__``.
 
     Raises:
-        ValueError: If a column is neither a known price column nor a
-            ``fund:``-prefixed fundamental column.
+        ValueError: If a column is neither a known price column, a
+            ``fund:``-prefixed fundamental column, nor an
+            ``onchain:``-prefixed on-chain data column.
     """
     for column in cols:
         if column in _PRICE_COLS:
             continue
         if column.startswith("fund:"):
+            continue
+        if column.startswith("onchain:"):
             continue
         raise ValueError(f"unknown panel column: {column}")
 
@@ -108,8 +112,9 @@ class AlphaMeta(BaseModel):
         """Validate factor panel dependencies.
 
         Price columns are fixed, while fundamental fields are an open namespace
-        under the ``fund:`` prefix. The runtime loader decides whether a
-        particular fundamental field can be populated.
+        under the ``fund:`` prefix and on-chain data under the ``onchain:``
+        prefix. The runtime loader decides whether a particular field can
+        be populated.
 
         Args:
             v: Declared panel columns.
@@ -119,7 +124,7 @@ class AlphaMeta(BaseModel):
 
         Raises:
             ValueError: If any column is outside the price set and the
-                ``fund:`` namespace.
+                ``fund:`` / ``onchain:`` namespaces.
         """
         validate_columns_required(v)
         return v

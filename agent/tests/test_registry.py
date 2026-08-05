@@ -242,6 +242,7 @@ class TestFallbackChains:
         assert FALLBACK_CHAINS["a_share"] == [
             "tencent",
             "mootdx",
+            "baidu",
             "eastmoney",
             "baostock",
             "akshare",

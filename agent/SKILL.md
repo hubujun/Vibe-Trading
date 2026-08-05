@@ -53,7 +53,7 @@ Add to your agent's MCP config:
 
 ### API Key Requirements
 
-Core research MCP tools work with zero API keys for HK/US/Canada/crypto. After `pip install`, backtesting, market data, factor analysis, options pricing, chart patterns, web search, document reading, trade journal analysis, shadow-account extraction/backtest/report, the Alpha Zoo (462 pre-built alphas), and all 90 skills are ready to use. IBKR tools require a local TWS / IB Gateway session; `run_swarm` requires an LLM key.
+Core research MCP tools work with zero API keys for HK/US/crypto. After `pip install`, backtesting, market data, factor analysis, options pricing, chart patterns, web search, document reading, trade journal analysis, shadow-account extraction/backtest/report, the Alpha Zoo (471 pre-built alphas), and all 89 skills are ready to use. IBKR tools require a local TWS / IB Gateway session; `run_swarm` requires an LLM key.
 
 | Feature | Key needed | When |
 |---------|-----------|------|
@@ -110,13 +110,14 @@ Example workflow:
 
 Use `list_swarm_presets()` to see all teams, then `run_swarm()` to execute.
 
-### Alpha Zoo (462 pre-built alphas)
-One-line cross-sectional IC / IR / alive-reversed-dead categorisation across five bundled zoos:
+### Alpha Zoo (471 pre-built alphas)
+One-line cross-sectional IC / IR / alive-reversed-dead categorisation across six bundled zoos:
 - **qlib158** (154 alphas) — Microsoft Qlib's `Alpha158` feature handler, Apache-2.0 with pinned commit SHA.
 - **alpha101** (101 alphas) — Kakushadze (2015) "101 Formulaic Alphas" (arXiv:1601.00991), written from the paper appendix.
 - **gtja191** (191 alphas) — Guotai Junan 2014 "191 Short-period Trading Alpha Factors" research report.
 - **academic** (12 factors) — Fama-French 5 + Carhart momentum + Jegadeesh reversal + George-Hwang 52-week-high + Amihud illiquidity + Harvey-Siddique skew + Frazzini-Pedersen betting-against-beta (price-based proxies) + a correlation-rewiring stability score (from the in-repo correlation-regime skill).
 - **fundamental** (4 factors) — PIT-safe earnings yield, ROE, gross profitability, and asset growth from daily fundamental panels.
+- **crypto** (5 factors) — Funding rate (carry), OI change & OI-price divergence (sentiment), volume ratio, and intraday amplitude (volatility) for perpetual swap markets.
 
 Each alpha ships with `__alpha_meta__` (formula LaTeX + theme + universe + warmup + columns required), guarded by an AST purity gate + 300-row lookahead sentinel test. Use the `vibe-trading alpha {list,show,bench,compare,export-manifest}` CLI, the `/alpha/*` REST routes (browser at `/alpha-zoo`), or compose multi-factor signals via `ZooSignalEngine.from_zoo(...)`.
 
