@@ -74,11 +74,7 @@ const ZOO_CARDS: ZooCard[] = [
   },
   {
     id: "crypto",
-    title: "Crypto On-Chain & Derivatives",
-    description:
-      "Cryptocurrency-native factors — funding rate carry, OI sentiment, on-chain metrics (NVT, MVRV, active addresses, exchange netflow), and market microstructure (amplitude, volume ratio).",
     approxCount: 9,
-    accent: "from-orange-500/20 to-orange-500/5",
   },
 ];
 
