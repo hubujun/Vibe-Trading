@@ -966,14 +966,16 @@
       "alpha101": "Kakushadze 101 Formulaic Alphas",
       "gtja191": "GTJA 191",
       "academic": "Academic Anomalies",
-      "fundamental": "PIT-Safe Fundamentals"
+      "fundamental": "PIT-Safe Fundamentals",
+      "crypto": "Crypto On-Chain & Derivatives"
     },
     "zooCardDesc": {
       "qlib158": "Microsoft Qlib's full 158-feature library covering momentum, volatility, volume and rolling statistical signals.",
       "alpha101": "The 101 formulaic alphas from Kakushadze (2015); short-horizon cross-sectional signals.",
       "gtja191": "Guotai Junan Securities' 191 alphas; technical and microstructure signals tuned to China A-share markets.",
       "academic": "Curated long-horizon anomalies from the academic literature (value, momentum, quality, low-vol, etc.).",
-      "fundamental": "Quality and value factors computed from PIT-safe SEC company facts — earnings yield, ROE, gross profitability, asset growth (filed-date anchored)."
+      "fundamental": "Quality and value factors computed from PIT-safe SEC company facts — earnings yield, ROE, gross profitability, asset growth (filed-date anchored).",
+      "crypto": "Cryptocurrency-native factors — funding rate carry, OI sentiment, on-chain metrics (NVT, MVRV, active addresses, exchange netflow), and market microstructure (amplitude, volume ratio)."
     },
     "universeOption": {
       "csi300": "CSI 300 (China A)",

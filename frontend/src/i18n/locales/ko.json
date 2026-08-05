@@ -961,14 +961,16 @@
       "alpha101": "Kakushadze 101 공식 Alpha",
       "gtja191": "GTJA 191",
       "academic": "학술 이상 현상",
-      "fundamental": "펀더멘털 (PIT-safe)"
+      "fundamental": "펀더멘털 (PIT-safe)",
+      "crypto": "크립토 온체인 & 파생상품"
     },
     "zooCardDesc": {
       "qlib158": "Microsoft Qlib의 전체 158개 피처 라이브러리. 모멘텀, 변동성, 거래량 및 롤링 통계 시그널을 포함합니다.",
       "alpha101": "Kakushadze(2015)의 101개 공식 alpha 시그널. 단기 횡단면 시그널.",
       "gtja191": "궈타이쥔안증권의 191개 Alpha. 중국 A주 시장에 최적화된 기술적 및 마이크로스트럭처 시그널.",
       "academic": "학술 문헌에서 선별된 장기 이상 현상(가치, 모멘텀, 품질, 저변동성 등).",
-      "fundamental": "PIT-safe SEC company facts로 계산되는 퀄리티·밸류 팩터 — earnings yield, ROE, gross profitability, asset growth (filed-date 기준)."
+      "fundamental": "PIT-safe SEC company facts로 계산되는 퀄리티·밸류 팩터 — earnings yield, ROE, gross profitability, asset growth (filed-date 기준).",
+      "crypto": "크립토 네이티브 팩터 — 펀딩비 캐리, 미결제약정 센티먼트, 온체인 지표(NVT, MVRV, 활성 주소, 거래소 순유입), 시장 미시구조(진폭, 거래량 비율)."
     },
     "universeOption": {
       "csi300": "CSI 300 (중국 A주)",

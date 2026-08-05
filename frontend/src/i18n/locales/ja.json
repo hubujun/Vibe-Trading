@@ -961,14 +961,16 @@
       "alpha101": "Kakushadze 101 定式 Alpha",
       "gtja191": "GTJA 191",
       "academic": "学術的アノマリー",
-      "fundamental": "ファンダメンタル（PIT セーフ）"
+      "fundamental": "ファンダメンタル（PIT セーフ）",
+      "crypto": "クリプト オンチェーン & デリバティブ"
     },
     "zooCardDesc": {
       "qlib158": "Microsoft Qlib の全 158 特徴ライブラリ。モメンタム、ボラティリティ、出来高、ローリング統計シグナルをカバー。",
       "alpha101": "Kakushadze (2015) の 101 個の定式 alpha シグナル。短期ホライゾンのクロスセクションシグナル。",
       "gtja191": "国泰君安証券の 191 個の Alpha。中国 A 株市場向けにチューニングされたテクニカルおよびマイクロストラクチャーシグナル。",
       "academic": "学術文献からの長期ホライズンアノマリーのキュレーション (バリュー、モメンタム、クオリティ、低ボラティリティなど)。",
-      "fundamental": "PIT セーフな SEC company facts から算出される品質・バリュー系ファクター — earnings yield、ROE、gross profitability、asset growth（filed-date 基準）。"
+      "fundamental": "PIT セーフな SEC company facts から算出される品質・バリュー系ファクター — earnings yield、ROE、gross profitability、asset growth（filed-date 基準）。",
+      "crypto": "クリプトネイティブファクター — 資金調達率キャリー、OI センチメント、オンチェーン指標（NVT、MVRV、アクティブアドレス、取引所ネットフロー）、および市場マイクロストラクチャ（変動率、出来高比率）。"
     },
     "universeOption": {
       "csi300": "CSI 300 (中国 A 株)",
