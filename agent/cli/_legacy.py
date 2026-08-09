@@ -5507,6 +5507,10 @@ def _build_parser() -> argparse.ArgumentParser:
     from cli.commands.strategy_evidence import add_subparser as _add_strategy_evidence_subparser
     _add_strategy_evidence_subparser(subparsers)
 
+    # Crypto Autopilot (24/7 autonomous trading loop: start / stop / status)
+    from src.crypto_autopilot.cli_entry import register_parser as _add_autopilot_subparser
+    _add_autopilot_subparser(subparsers)
+
     return parser
 
 
@@ -6416,6 +6420,9 @@ def main(argv: list[str] | None = None) -> int:
         return _coerce_exit_code(_strategy_evidence_dispatch(args))
     if args.command == "portfolio":
         return _coerce_exit_code(_dispatch_portfolio(args))
+    if args.command == "autopilot":
+        from src.crypto_autopilot.cli_entry import dispatch as _autopilot_dispatch
+        return _coerce_exit_code(_autopilot_dispatch(args))
     if args.command == "connector":
         return _coerce_exit_code(_dispatch_connector(args))
     if args.command == "memory":
