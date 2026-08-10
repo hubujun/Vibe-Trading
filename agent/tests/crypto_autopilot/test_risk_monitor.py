@@ -30,9 +30,17 @@ def risk_monitor(monkeypatch, tmp_path):
     ``src.live.halt`` resolves the sentinel path via
     ``src.config.paths.get_runtime_root()`` which reads the
     ``VIBE_TRADING_HOME`` env var.  Setting it to ``tmp_path`` ensures
-    HALT files are created and cleaned up inside the temp dir.
+    HALT files are created and cleaned up inside the temp dir. The
+    IM-notify outbox is redirected to ``tmp_path`` as well so halt
+    notifications never leak into the real autopilot runtime tree.
     """
     monkeypatch.setenv("VIBE_TRADING_HOME", str(tmp_path))
+    # Redirect the IM-notify outbox so halt notifications stay in the
+    # temp dir too (the notifier resolves its root via _default_runtime_root).
+    monkeypatch.setattr(
+        "src.crypto_autopilot.risk_monitor._default_runtime_root",
+        lambda: tmp_path,
+    )
     # Ensure any prior halt sentinel from a previous test is cleared.
     monitor = RiskMonitor(config=AutopilotConfig())
     monitor.clear_halt()

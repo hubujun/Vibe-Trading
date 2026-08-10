@@ -107,6 +107,7 @@ def start_command(args: Any = None) -> int:
         Exit code: 0 on clean exit, 1 on error.
     """
     from src.crypto_autopilot.config import load_autopilot_config
+    from src.crypto_autopilot.decay_integration import AutopilotDecayManager
     from src.crypto_autopilot.orchestrator import AutopilotOrchestrator
 
     config = load_autopilot_config()
@@ -120,7 +121,20 @@ def start_command(args: Any = None) -> int:
     print(f"  trade every {config.trade_interval_minutes}m")
     print(f"  feedback every {config.feedback_interval_hours}h")
 
+    # Close the SDM decay loop: factors registered in the strategy store
+    # are scanned each feedback cycle and auto-retired when IC/Sharpe decay.
     orchestrator = AutopilotOrchestrator(config=config)
+    try:
+        from src.strategy_store._shared import get_store
+
+        decay_manager = AutopilotDecayManager(
+            factor_store=orchestrator._factor_store,
+            strategy_store=get_store(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("SDM decay integration unavailable: %s", exc)
+        decay_manager = None
+    orchestrator.attach_decay_manager(decay_manager)
 
     try:
         asyncio.run(_run_with_signal_handler(orchestrator))

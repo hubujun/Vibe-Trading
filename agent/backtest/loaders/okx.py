@@ -176,6 +176,7 @@ class DataLoader:
         *,
         interval: str = "1D",
         fields: Optional[List[str]] = None,
+        prefer_history: Optional[bool] = None,
     ) -> Dict[str, pd.DataFrame]:
         """Fetch crypto OHLCV via OKX public API.
 
@@ -185,6 +186,10 @@ class DataLoader:
             end_date: End date (YYYY-MM-DD).
             fields: Ignored (OKX has no extra fields).
             interval: Bar size (1m/5m/15m/30m/1h/1H/4h/4H/1d/1D), default ``1D``.
+            prefer_history: Force the deep ``history-candles`` endpoint instead
+                of the age-based heuristic. The recent-only endpoint caps at
+                ~1440 bars (~60 days of 1h), so long-range callers (e.g. the
+                autopilot history store) must pass ``True`` to get full spans.
 
         Returns:
             Mapping symbol -> DataFrame.
@@ -218,7 +223,10 @@ class DataLoader:
         else:
             max_pages = 40
 
-        use_history = self._should_use_history(start_date)
+        use_history = (
+            self._should_use_history(start_date)
+            if prefer_history is None else bool(prefer_history)
+        )
         session = _okx_session()
 
         result: Dict[str, pd.DataFrame] = {}
