@@ -232,6 +232,91 @@ class FeedbackAnalyzer:
         )
         return unique_hints[:10]  # Cap at 10 hints.
 
+    def _regime_context(self, factor_results: list[dict[str, Any]]) -> str:
+        """Return a market-regime paragraph for the analysis prompt.
+
+        Reads the regime snapshot attached by the orchestrator (each result
+        carries the same dict). Falls back to a plain sentence when the
+        snapshot is absent so older callers keep working.
+
+        Args:
+            factor_results: Factor result dicts (first entry carries
+                ``regime``).
+
+        Returns:
+            A short paragraph describing the current regime.
+        """
+        snapshot = {}
+        for result in factor_results:
+            if isinstance(result.get("regime"), dict):
+                snapshot = result["regime"]
+                break
+        regime = snapshot.get("regime", "unknown")
+        if regime == "unknown" and not snapshot:
+            return (
+                "Market regime snapshot unavailable this cycle; evaluate "
+                "factors on absolute performance only."
+            )
+        parts = [f"Current market regime: {regime}."]
+        if snapshot.get("high_vol"):
+            parts.append("High-volatility regime: expect wider stops and lower signal reliability.")
+        if snapshot.get("fused") is not None:
+            state = "fused" if snapshot.get("fused") else "not fused"
+            parts.append(f"Cross-asset correlation state: {state}.")
+        if snapshot.get("lag1_autocorr") is not None:
+            parts.append(
+                f"Basket lag-1 autocorrelation: {snapshot.get('lag1_autocorr'):+.3f} "
+                "(positive → momentum-friendly, negative → mean-reversion-friendly)."
+            )
+        parts.append(
+            "Interpret each factor's performance conditional on this regime; "
+            "flag factors whose edge depends on a single regime as fragile."
+        )
+        return " ".join(parts)
+
+    # ------------------------------------------------------------------
+    # Internal: benchmark context
+    # ------------------------------------------------------------------
+
+    def _benchmark_context(self) -> str:
+        """Return a buy-and-hold benchmark paragraph for the analysis prompt.
+
+        Best-effort: fetches daily bars for :attr:`config.benchmark_symbol`
+        and summarises the recent trend plus the annual return target. Any
+        failure degrades to a plain target-only sentence so the feedback
+        loop never breaks on market-data problems.
+        """
+        target = self.config.target_annual_return
+        base = (
+            f"Portfolio annual-return target: {target:.0%}. "
+            "Compare factor performance against holding the benchmark instead "
+            "of absolute P&L alone."
+        )
+        try:
+            from src.crypto_autopilot.market_feed import MarketFeed
+
+            bars = MarketFeed().fetch_bars(
+                self.config.benchmark_symbol, period="1d", limit=30,
+            )
+            if bars is None or bars.empty or "close" not in bars:
+                return base
+            closes = bars["close"]
+            if len(closes) < 2:
+                return base
+            first = float(closes.iloc[0])
+            last = float(closes.iloc[-1])
+            if first <= 0:
+                return base
+            ret = (last / first - 1.0) * 100.0
+            return (
+                f"Benchmark {self.config.benchmark_symbol} over the last "
+                f"{len(closes)} daily bars: {ret:+.1f}% ({first:.2f} -> {last:.2f}). "
+                f"Annual-return target: {target:.0%}."
+            )
+        except Exception as exc:  # noqa: BLE001 — benchmark is best-effort
+            logger.debug("FeedbackAnalyzer: benchmark context failed: %s", exc)
+            return base
+
     # ------------------------------------------------------------------
     # Internal: prompt construction
     # ------------------------------------------------------------------
@@ -264,11 +349,22 @@ class FeedbackAnalyzer:
 
         summary_text = "\n".join(summaries[:50])  # Cap at 50 factors.
 
+        benchmark_text = self._benchmark_context()
+        regime_text = self._regime_context(factor_results)
+
         prompt = f"""You are a quantitative research analyst reviewing crypto trading factor performance.
 
 ## Factor Performance Summary
 
 {summary_text}
+
+## Market Regime Context
+
+{regime_text}
+
+## Benchmark Context
+
+{benchmark_text}
 
 ## Analysis Request
 

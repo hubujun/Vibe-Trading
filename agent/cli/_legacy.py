@@ -6376,6 +6376,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
     if args.command == "serve":
+        # The API server reads runtime config from env (e.g. autopilot
+        # intervals); load dotenv before serve_main builds the app so the
+        # served config matches the autopilot process.
+        _ensure_cli_env()
         return serve_main(raw_argv[1:])
     if args.command == "provider":
         if args.provider_command == "login":
