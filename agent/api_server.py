@@ -275,11 +275,9 @@ register_options_routes(app)
 from src.api.autopilot_routes import register_autopilot_routes  # noqa: E402
 register_autopilot_routes(app)
 
-# --- Options Lab (vol surface + Greeks) + Portfolio Studio (risk x-ray/constraints) ---
+# --- Options Lab (vol surface + Greeks) ---
 from src.api.options_lab_routes import register_options_lab_routes  # noqa: E402
-from src.api.portfolio_routes import register_portfolio_routes  # noqa: E402
 register_options_lab_routes(app)
-register_portfolio_routes(app)
 
 # --- Auth helpers (SSE tickets) ---
 from src.api.auth_routes import register_auth_routes  # noqa: E402
