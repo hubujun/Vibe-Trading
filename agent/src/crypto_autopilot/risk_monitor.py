@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from src.crypto_autopilot.config import AutopilotConfig, load_autopilot_config
+from src.crypto_autopilot.notifier import AutopilotNotifier
 from src.live.halt import clear_halt as _clear_halt
 from src.live.halt import halt_flag_set
 from src.live.halt import trip_halt
@@ -48,6 +49,11 @@ _CONSECUTIVE_LOSS_DAYS = 3
 
 #: Trip source label recorded in the HALT sentinel's ``by`` field.
 _HALT_TRIP_SOURCE = "cli"
+
+
+def _default_runtime_root() -> Path:
+    """Return the default autopilot runtime root for the notify outbox."""
+    return Path(__file__).resolve().parents[2] / "runs" / "autopilot"
 
 
 class RiskMonitor:
@@ -89,6 +95,12 @@ class RiskMonitor:
         # path is owned by src.live.halt (resolved from the runtime root).
         # This avoids a second source of truth for the kill-switch location.
         self._halt_dir: Path | None = halt_dir
+
+        # Best-effort IM outbox — halt events are relayed to chat channels
+        # by the API server's autopilot-notify worker.
+        self._notifier: AutopilotNotifier = AutopilotNotifier(
+            _default_runtime_root()
+        )
 
     # ------------------------------------------------------------------
     # Daily loss check
@@ -258,6 +270,13 @@ class RiskMonitor:
                 self.broker,
             )
             raise
+        # Notify operators about the halt (best-effort, never raises).
+        self._notifier.notify(
+            "halt_tripped",
+            "Autopilot halt tripped",
+            reason,
+            meta={"reason": reason, "broker": self.broker},
+        )
 
     def is_halted(self) -> bool:
         """Return whether the kill switch is currently tripped.

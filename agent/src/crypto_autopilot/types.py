@@ -156,6 +156,8 @@ class PipelineState:
         last_tick_at: UTC timestamp of the most recent tick, or ``None``.
         tick_count: Total number of ticks processed since boot.
         updated_at: UTC timestamp this state was last mutated.
+        regime: Latest market-regime classification (Phase 3), or ``None``
+            before the first feedback tick computed it.
     """
 
     phase: PipelinePhase = PipelinePhase.IDLE
@@ -163,3 +165,4 @@ class PipelineState:
     last_tick_at: datetime | None = None
     tick_count: int = 0
     updated_at: datetime | None = None
+    regime: dict[str, Any] | None = None

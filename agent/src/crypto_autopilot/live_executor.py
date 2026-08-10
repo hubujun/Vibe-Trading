@@ -35,11 +35,14 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from src.crypto_autopilot.config import AutopilotConfig, load_autopilot_config
+from src.crypto_autopilot.daily_counter import DailyOrderCounter
 from src.crypto_autopilot.mandate_template import MandateTemplate
+from src.crypto_autopilot.notifier import AutopilotNotifier
 from src.crypto_autopilot.risk_monitor import RiskMonitor
+from src.crypto_autopilot.trade_ledger import write_trade_record
 from src.live.audit import LiveActionEvent, write_live_action
 from src.live.enforcement import OrderIntent, check_mandate
 from src.live.halt import halt_flag_set, trip_halt
@@ -47,6 +50,9 @@ from src.live.mandate.model import Mandate
 from src.live.mandate.store import _parse_mandate
 from src.trading.connectors.okx import sdk as okx_sdk
 from src.trading.connectors.okx.sdk import OKXConfig, OKXConfigError, load_config
+
+if TYPE_CHECKING:
+    from src.crypto_autopilot.paper_engine import PaperEngine
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +67,11 @@ _HALT_TRIP_SOURCE = "file"
 
 #: Audit session id for the autopilot live channel.
 _SESSION_ID = "crypto-autopilot-live"
+
+
+def _default_runtime_root() -> Path:
+    """Return the default autopilot runtime root for persisted counters."""
+    return Path(__file__).resolve().parents[2] / "runs" / "autopilot"
 
 
 class LiveExecutor:
@@ -83,6 +94,9 @@ class LiveExecutor:
         self,
         config: AutopilotConfig | None = None,
         mandate_path: Path | None = None,
+        runtime_root: Path | None = None,
+        paper_engine: "PaperEngine | None" = None,
+        shadow_mode: bool = False,
     ) -> None:
         """Initialize the live executor.
 
@@ -93,9 +107,30 @@ class LiveExecutor:
                 autopilot config defaults. When provided, the file is
                 parsed via :func:`yaml.safe_load` and validated through the
                 mandate store's parser.
+            runtime_root: Directory for the persisted daily order counter
+                (``<runtime_root>/daily_orders.json``). Defaults to the
+                autopilot runtime root so the count survives restarts.
+            paper_engine: Optional :class:`PaperEngine` for shadow mode —
+                when set together with ``shadow_mode=True`` every live fill
+                is mirrored with a same-signal paper fill so the gap report
+                can compare execution quality.
+            shadow_mode: When True, mirror live fills with paper fills
+                (requires ``paper_engine``).
         """
         self.config: AutopilotConfig = config or load_autopilot_config()
         self.broker: str = _BROKER_KEY
+        self._paper_engine = paper_engine
+        self.shadow_mode: bool = bool(shadow_mode)
+
+        runtime = runtime_root or _default_runtime_root()
+        self._runtime_root: Path = runtime
+
+        # Persisted per-UTC-day order counter (survives restarts).
+        self._daily_counter: DailyOrderCounter = DailyOrderCounter(runtime)
+
+        # Best-effort IM outbox — order/halt events are relayed to chat
+        # channels by the API server's autopilot-notify worker.
+        self._notifier: AutopilotNotifier = AutopilotNotifier(runtime)
 
         # Build OKX live config. Try to load credentials from the runtime
         # file and override the profile to "live"; fall back to a bare
@@ -469,7 +504,7 @@ class LiveExecutor:
             balance,
             broker=self.broker,
             remote_tool="okx_place_order",
-            daily_count=0,  # TODO: wire the persisted daily counter
+            daily_count=self._daily_counter.count_today(),
         )
         if breach is not None:
             logger.warning(
@@ -515,6 +550,63 @@ class LiveExecutor:
                                 "notional": notional},
                 broker_response=result,
             )
+            # Count the accepted order toward the persisted daily cap.
+            try:
+                self._daily_counter.increment()
+            except OSError as exc:
+                logger.warning(
+                    "could not persist daily order counter (%s) — the "
+                    "next mandate check may under-count", exc,
+                )
+            # Shadow mode: mirror the live fill with a same-signal paper
+            # fill so the gap report can compare paper vs live execution.
+            # Best-effort — a shadow failure never blocks the live fill.
+            if self.shadow_mode and self._paper_engine is not None:
+                try:
+                    shadow = self._paper_engine.place_order(
+                        symbol=clean_symbol,
+                        side=clean_side,
+                        notional=float(notional),
+                    )
+                    if shadow.get("status") != "ok":
+                        logger.warning(
+                            "shadow paper fill for %s %s failed: %s",
+                            clean_side, clean_symbol,
+                            shadow.get("reason", shadow.get("status")),
+                        )
+                except Exception as exc:  # noqa: BLE001 — never blocks live
+                    logger.warning(
+                        "shadow paper fill failed for %s %s: %s",
+                        clean_side, clean_symbol, exc,
+                    )
+            # Notify operators about the fill (best-effort, never blocks).
+            self._notifier.notify(
+                "order_filled",
+                f"Order filled: {clean_side.upper()} {clean_symbol}",
+                f"notional={notional} USDT",
+                meta={
+                    "symbol": clean_symbol,
+                    "side": clean_side,
+                    "notional": notional,
+                },
+            )
+            # Append to the unified trade ledger (Shadow Account audit
+            # stream).  The live SDK result carries no fill price/quantity
+            # or fee for market orders, so those fields are estimated with
+            # the configured taker rate (best-effort cost realism).
+            try:
+                write_trade_record(
+                    self._runtime_root,
+                    engine="live",
+                    symbol=clean_symbol,
+                    side=clean_side,
+                    notional=float(notional),
+                    fee=float(notional) * self.config.fee_rate_taker,
+                )
+            except Exception as exc:  # noqa: BLE001 — audit never blocks
+                logger.warning(
+                    "place_order: trade ledger write failed: %s", exc,
+                )
         else:
             self._audit(
                 kind="order_rejected", outcome="error",

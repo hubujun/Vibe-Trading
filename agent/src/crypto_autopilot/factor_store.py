@@ -22,6 +22,7 @@ from typing import Any
 from src.crypto_autopilot.factor_miner import _assemble_module_source
 from src.crypto_autopilot.types import FactorCandidate, FactorLifecycle
 from src.factors.registry import reset_default_registry
+from src.strategy_store.models import Artifact, ArtifactStatus, ArtifactType, BenchResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,28 @@ _LIFECYCLE_TO_HYPOTHESIS_STATUS: dict[FactorLifecycle, str] = {
     FactorLifecycle.RETIRED: "rejected",
 }
 
+#: Mapping from :class:`FactorLifecycle` stages to strategy-store artifact
+#: statuses (the SDM decay monitor watches ACTIVE/MONITORING artifacts and
+#: drives them toward DISABLED, which the autopilot maps back to RETIRED).
+_LIFECYCLE_TO_ARTIFACT_STATUS: dict[FactorLifecycle, ArtifactStatus] = {
+    FactorLifecycle.BACKTESTED: ArtifactStatus.BENCHING,
+    FactorLifecycle.PAPER_VALIDATED: ArtifactStatus.ACTIVE,
+    FactorLifecycle.LIVE_DEPLOYED: ArtifactStatus.ACTIVE,
+    FactorLifecycle.RETIRED: ArtifactStatus.DISABLED,
+}
+
 #: Regex for valid zoo id tokens (lowercase, digits, underscore).
 _ZOO_ID_RE: re.Pattern[str] = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _as_float(value: Any) -> float | None:
+    """Coerce a metric value to float, returning ``None`` when invalid."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _default_zoo_root() -> Path:
@@ -75,6 +96,7 @@ class FactorStore:
         self,
         zoo_root: Path | None = None,
         hypotheses_registry: Any = None,
+        strategy_store: Any = None,
     ) -> None:
         """Initialise the factor store.
 
@@ -85,9 +107,17 @@ class FactorStore:
                 :class:`~src.hypotheses.registry.HypothesisRegistry`
                 instance for tracking the factor's research lifecycle.
                 When ``None``, lifecycle integration is a no-op.
+            strategy_store: Optional
+                :class:`~src.strategy_store.store.StrategyStoreProtocol`
+                instance (SDM side).  When provided, each stored factor is
+                registered as a ``factor`` artifact and lifecycle advances
+                are mirrored so the SDM decay monitor can watch and
+                auto-retire decaying factors.  When ``None``, the SDM
+                integration is a no-op.
         """
         self.zoo_root = Path(zoo_root) if zoo_root is not None else _default_zoo_root()
         self.hypotheses_registry = hypotheses_registry
+        self.strategy_store = strategy_store
 
     # ------------------------------------------------------------------
     # Public API
@@ -134,6 +164,10 @@ class FactorStore:
         if self.hypotheses_registry is not None:
             self._record_hypothesis(candidate)
 
+        # Optionally register the factor with the SDM strategy store so the
+        # decay monitor can evaluate it once bench history accumulates.
+        self._sync_artifact(candidate)
+
         return out_path
 
     def advance_lifecycle(
@@ -153,6 +187,14 @@ class FactorStore:
             alpha_id: The factor identifier.
             new_stage: The new lifecycle stage.
         """
+        # Mirror the stage into the SDM artifact status so the decay
+        # monitor's state machine stays aligned with the autopilot.  This
+        # runs even without a hypotheses registry (the SDM side is
+        # independent of the research-lifecycle tracking).
+        artifact_status = _LIFECYCLE_TO_ARTIFACT_STATUS.get(new_stage)
+        if artifact_status is not None:
+            self._sync_lifecycle_status(alpha_id, artifact_status)
+
         if self.hypotheses_registry is None:
             logger.debug(
                 "FactorStore: no hypotheses_registry; skipping lifecycle "
@@ -198,6 +240,57 @@ class FactorStore:
                 exc,
             )
 
+        # Mirror the stage into the SDM artifact status so the decay
+        # monitor's state machine stays aligned with the autopilot.
+        artifact_status = _LIFECYCLE_TO_ARTIFACT_STATUS.get(new_stage)
+        if artifact_status is not None:
+            self._sync_lifecycle_status(alpha_id, artifact_status)
+
+    def record_bench(
+        self,
+        alpha_id: str,
+        metrics: dict[str, Any],
+        *,
+        bench_type: str = "backtest",
+    ) -> None:
+        """Record a backtest/paper bench result for the SDM decay monitor.
+
+        Maps the autopilot's metric dict (``ic_mean``, ``ic_std``, ``ic_ir``,
+        ``ic_positive_ratio``, ``ic_t_stat``, ``sharpe``, …) into a
+        :class:`BenchResult` for the factor's strategy-store artifact.  Any
+        failure is logged and swallowed — decay tracking must never block
+        the trading loop.
+
+        Args:
+            alpha_id: The factor identifier.
+            metrics: Metric dict produced by the screen/backtest/paper
+                phases (unknown keys are ignored).
+            bench_type: Label for the bench record, e.g. ``"backtest"``
+                or ``"paper"``.
+        """
+        store = self.strategy_store
+        if store is None:
+            return
+        try:
+            store.record_bench(
+                BenchResult(
+                    artifact_id=alpha_id,
+                    bench_type=bench_type,
+                    ic_mean=_as_float(metrics.get("ic_mean")),
+                    ic_std=_as_float(metrics.get("ic_std")),
+                    ir=_as_float(metrics.get("ic_ir")) or _as_float(metrics.get("ir")),
+                    ic_positive_ratio=_as_float(metrics.get("ic_positive_ratio")),
+                    t_stat=_as_float(metrics.get("ic_t_stat")) or _as_float(metrics.get("t_stat")),
+                    sharpe=_as_float(metrics.get("sharpe")),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FactorStore: failed to record bench for %s: %s",
+                alpha_id,
+                exc,
+            )
+
     def list_factors(self) -> list[str]:
         """List all alpha_ids in the crypto_mined zoo.
 
@@ -221,6 +314,94 @@ class FactorStore:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _sync_artifact(self, candidate: FactorCandidate) -> None:
+        """Register (or refresh) the factor as an SDM strategy-store artifact.
+
+        Best-effort: any failure is logged and swallowed so SDM sync can
+        never block persistence of a mined factor.
+
+        Args:
+            candidate: The factor candidate being stored.
+        """
+        store = self.strategy_store
+        if store is None:
+            return
+        try:
+            meta = candidate.meta.get("alpha_meta", {}) if isinstance(candidate.meta, dict) else {}
+            existing = store.get_artifact(candidate.alpha_id)
+            if existing is not None:
+                logger.debug(
+                    "FactorStore: artifact %s already registered; refreshing",
+                    candidate.alpha_id,
+                )
+                return
+            store.register_artifact(
+                Artifact(
+                    id=candidate.alpha_id,
+                    type=ArtifactType.FACTOR,
+                    name=candidate.alpha_id,
+                    universe="crypto",
+                    status=ArtifactStatus.CREATED,
+                    theme=tuple(meta.get("theme", [])),
+                    decay_horizon=int(meta.get("decay_horizon", 20) or 20),
+                    signal_definition=meta.get("notes", ""),
+                    source_paper="crypto_autopilot_mined",
+                    signal_engine_path=str(self.zoo_root),
+                )
+            )
+            logger.info(
+                "FactorStore: registered SDM artifact %s (crypto)",
+                candidate.alpha_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FactorStore: SDM artifact registration failed for %s: %s",
+                candidate.alpha_id,
+                exc,
+            )
+
+    def _sync_lifecycle_status(
+        self,
+        alpha_id: str,
+        status: ArtifactStatus,
+    ) -> None:
+        """Mirror a lifecycle advance into the SDM artifact status.
+
+        ``RETIRED`` maps to ``DISABLED`` (the terminal decay state) so the
+        decay monitor never resurrects a retired factor.  Best-effort.
+
+        Args:
+            alpha_id: The factor identifier.
+            status: The strategy-store status to apply.
+        """
+        store = self.strategy_store
+        if store is None:
+            return
+        try:
+            if store.get_artifact(alpha_id) is None:
+                logger.debug(
+                    "FactorStore: no SDM artifact for %s; skipping status sync",
+                    alpha_id,
+                )
+                return
+            reason = (
+                "factor lifecycle retired by autopilot"
+                if status is ArtifactStatus.DISABLED
+                else f"factor lifecycle advanced to {status.value}"
+            )
+            store.update_status(alpha_id, status, reason=reason)
+            logger.info(
+                "FactorStore: SDM artifact %s → %s",
+                alpha_id,
+                status.value,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "FactorStore: SDM status sync failed for %s: %s",
+                alpha_id,
+                exc,
+            )
 
     @staticmethod
     def _compute_short_id(alpha_id: str) -> str:
