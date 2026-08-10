@@ -123,6 +123,14 @@ from src.api.scheduled_routes import (  # noqa: F401, E402
     _stop_scheduled_research_executor,
     _stop_scheduled_research_on_shutdown,
 )
+from src.api.autopilot_notify import (  # noqa: F401, E402
+    _start_autopilot_notify,
+    _stop_autopilot_notify,
+)
+from src.api.autopilot_watchdog import (  # noqa: F401, E402
+    _start_autopilot_watchdog,
+    _stop_autopilot_watchdog,
+)
 
 
 async def _run_startup_preflight() -> None:
@@ -137,6 +145,8 @@ async def _run_startup_preflight() -> None:
         logging.getLogger(__name__).warning("Legacy state migration failed", exc_info=True)
     run_preflight(console)
     _start_scheduled_research_executor()
+    _start_autopilot_notify()
+    _start_autopilot_watchdog()
     from src.config.accessor import get_env_config
 
     if get_env_config().agent_tuning.vibe_trading_channels_auto_start:
@@ -150,7 +160,15 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
         await _run_startup_preflight()
         yield
     finally:
-        await _stop_scheduled_research_on_shutdown()
+        try:
+            await _stop_scheduled_research_on_shutdown()
+        finally:
+            # This fork registers autopilot notify/watchdog drivers at startup;
+            # upstream's shutdown helper does not know about them.
+            try:
+                await _stop_autopilot_notify()
+            finally:
+                await _stop_autopilot_watchdog()
 
 
 app = FastAPI(
@@ -182,9 +200,7 @@ from src.api.runs_routes import register_runs_routes  # noqa: E402
 register_runs_routes(app)
 
 from src.api.runs_routes import (  # noqa: F401, E402
-    _load_json_file,
-    _load_csv_to_dict,
-    _build_response_from_run_dir,
+    _load_json_file, _load_csv_to_dict, _build_response_from_run_dir,
 )
 from src.api.attribution_routes import register_attribution_routes  # noqa: E402
 register_attribution_routes(app)
@@ -194,9 +210,7 @@ from src.api.sessions_routes import register_sessions_routes  # noqa: E402
 register_sessions_routes(app)
 
 from src.api.sessions_routes import (  # noqa: F401, E402
-    _goal_store,
-    _live_action_frame_from_tool_result,
-    _mandate_proposal_frame_from_tool_result,
+    _goal_store, _live_action_frame_from_tool_result, _mandate_proposal_frame_from_tool_result,
 )
 
 # --- System ---
@@ -210,9 +224,7 @@ from src.api.settings_routes import register_settings_routes  # noqa: E402
 register_settings_routes(app)
 
 from src.api.settings_routes import (  # noqa: F401, E402
-    _baostock_supported,
-    _baostock_installed,
-    _load_llm_providers,
+    _baostock_supported, _baostock_installed, _load_llm_providers,
 )
 
 # --- Uploads ---
@@ -220,11 +232,8 @@ from src.api.uploads_routes import register_uploads_routes  # noqa: E402
 register_uploads_routes(app)
 
 from src.api.uploads_routes import (  # noqa: F401, E402
-    MAX_UPLOAD_SIZE,
-    _BLOCKED_UPLOAD_EXT,
-    _BLOCKED_UPLOAD_NAMES,
-    _SHADOW_ID_RE,
-    _UPLOAD_CHUNK_SIZE,
+    MAX_UPLOAD_SIZE, _BLOCKED_UPLOAD_EXT, _BLOCKED_UPLOAD_NAMES,
+    _SHADOW_ID_RE, _UPLOAD_CHUNK_SIZE,
 )
 
 # --- Channels ---
@@ -235,9 +244,7 @@ register_channels_config_routes(app)
 from src.api.qveris_routes import qveris_router  # noqa: E402  # QVERIS-INTEGRATION
 app.include_router(qveris_router)  # QVERIS-INTEGRATION
 
-from src.api.channels_routes import (  # noqa: F401, E402
-    ChannelPairingCommandRequest,
-)
+from src.api.channels_routes import ChannelPairingCommandRequest  # noqa: F401, E402
 
 # --- Swarm ---
 from src.api.swarm_routes import register_swarm_routes  # noqa: E402
@@ -294,6 +301,16 @@ register_alpha_routes(app)
 from src.api.options_routes import register_options_routes  # noqa: E402
 register_options_routes(app)
 
+# --- Crypto autopilot ---
+from src.api.autopilot_routes import register_autopilot_routes  # noqa: E402
+register_autopilot_routes(app)
+
+# --- Options Lab (vol surface + Greeks) + Portfolio Studio (risk x-ray/constraints) ---
+from src.api.options_lab_routes import register_options_lab_routes  # noqa: E402
+from src.api.portfolio_routes import register_portfolio_routes  # noqa: E402
+register_options_lab_routes(app)
+register_portfolio_routes(app)
+
 # --- Auth helpers (SSE tickets) ---
 from src.api.auth_routes import register_auth_routes  # noqa: E402
 register_auth_routes(app)
@@ -303,7 +320,12 @@ register_auth_routes(app)
 from src.openbb_bridge import try_register_openbb_routes  # noqa: E402  # OPENBB-WORKSPACE-INTEGRATION
 try_register_openbb_routes(app)
 
-# --- Scheduled research ---
+# ============================================================================
+# Scheduled Research Routes - defined in src/api/scheduled_routes.py
+# ============================================================================
+# Job CRUD plus the playbook-template catalogue, all auth-gated. Handlers only
+# record and expose jobs; execution is guarded by VIBE_TRADING_ENABLE_SCHEDULER.
+
 from src.api.scheduled_routes import register_scheduled_routes  # noqa: E402
 register_scheduled_routes(app)
 
