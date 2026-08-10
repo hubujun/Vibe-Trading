@@ -109,6 +109,49 @@ class TestCrashRecovery:
         assert loaded.tick_count == 5
         assert loaded.active_factor_id == "crypto_mined_test"
 
+    def test_health_monitor_persists_regime_in_state(self, runtime_root) -> None:
+        """Phase 3: the market-regime snapshot round-trips through state.json."""
+        health = HealthMonitor(runtime_root)
+
+        saved = PipelineState(
+            phase=PipelinePhase.FEEDBACK,
+            tick_count=7,
+            last_tick_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        health.save_pipeline_state(saved, regime={
+            "regime": "trend", "high_vol": False, "fused": None,
+        })
+
+        loaded = health.load_pipeline_state()
+        assert loaded is not None
+        assert loaded.regime == {"regime": "trend", "high_vol": False, "fused": None}
+
+    def test_health_monitor_loads_legacy_state_without_regime(
+        self, runtime_root,
+    ) -> None:
+        """A pre-Phase-3 state.json (no regime key) still loads."""
+        import json as _json
+
+        health = HealthMonitor(runtime_root)
+        saved = PipelineState(
+            phase=PipelinePhase.PAPER_TRADING,
+            tick_count=3,
+            last_tick_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        health.save_pipeline_state(saved)
+        # Strip the regime key — simulating a legacy payload.
+        path = runtime_root / "autopilot" / "state.json"
+        raw = _json.loads(path.read_text(encoding="utf-8"))
+        raw.pop("regime", None)
+        path.write_text(_json.dumps(raw), encoding="utf-8")
+
+        loaded = health.load_pipeline_state()
+        assert loaded is not None
+        assert loaded.phase == PipelinePhase.PAPER_TRADING
+        assert loaded.regime is None
+
     def test_health_monitor_load_returns_none_when_no_state(self, runtime_root) -> None:
         """No state file → load returns None (start fresh)."""
         health = HealthMonitor(runtime_root)
@@ -239,3 +282,295 @@ class TestStatusReporting:
         assert "pairs" in cfg
         assert "mine_interval_hours" in cfg
         assert "trade_interval_minutes" in cfg
+
+
+# ---------------------------------------------------------------------------
+# 3. Trade gating (signal + cooldown)
+# ---------------------------------------------------------------------------
+
+
+class TestTradeGating:
+    """Verify paper orders are gated by factor signal and cooldown."""
+
+    @staticmethod
+    def _active_factor(ic_mean: float = 0.03) -> dict:
+        from src.crypto_autopilot.types import FactorCandidate, FactorLifecycle
+
+        candidate = FactorCandidate(
+            alpha_id="test_momentum_gate",
+            source_code="",
+            created_at=datetime.now(timezone.utc),
+            meta={"screen_ic_mean": ic_mean},
+        )
+        return {
+            "alpha_id": candidate.alpha_id,
+            "lifecycle": FactorLifecycle.BACKTESTED.value,
+            "candidate": candidate,
+        }
+
+    @staticmethod
+    def _orchestrator_with_factor(orchestrator, monkeypatch, values, ic_mean=0.03):
+        """Inject one active factor; return (orchestrator, mocked engine)."""
+        import pandas as pd
+        from unittest.mock import MagicMock
+
+        orch = orchestrator
+        orch._active_factors = [TestTradeGating._active_factor(ic_mean=ic_mean)]
+
+        def fake_execute(candidate):
+            return pd.DataFrame({"BTC-USDT": values})
+
+        monkeypatch.setattr(orch, "_execute_factor", fake_execute)
+        engine = MagicMock()
+        engine.place_order.return_value = {"status": "ok"}
+        monkeypatch.setattr(orch, "_paper_engine", engine)
+        return orch, engine
+
+    def test_positive_signal_fires_order(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [0.5, 0.8],
+        )
+        asyncio.run(orch._tick_trade())
+        engine.place_order.assert_called_once()
+        assert orch._last_trade_ts > 0.0
+
+    def test_flat_latest_value_skips_order(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [0.5, -0.3],
+        )
+        asyncio.run(orch._tick_trade())
+        engine.place_order.assert_not_called()
+
+    def test_negative_ic_trades_inverse(self, orchestrator, monkeypatch) -> None:
+        # Screened with negative IC → latest negative value is the signal.
+        orch, engine = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [-0.2, -0.6], ic_mean=-0.03,
+        )
+        asyncio.run(orch._tick_trade())
+        engine.place_order.assert_called_once()
+
+        orch2, engine2 = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [0.2, 0.6], ic_mean=-0.03,
+        )
+        asyncio.run(orch2._tick_trade())
+        engine2.place_order.assert_not_called()
+
+    def test_cooldown_blocks_repeat_order(self, orchestrator, monkeypatch) -> None:
+        import time
+
+        orch, engine = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [0.5, 0.8],
+        )
+        orch._last_trade_ts = time.monotonic()
+        asyncio.run(orch._tick_trade())
+        engine.place_order.assert_not_called()
+
+    def test_cooldown_expired_allows_order(self, orchestrator, monkeypatch) -> None:
+        import time
+
+        orch, engine = self._orchestrator_with_factor(
+            orchestrator, monkeypatch, [0.5, 0.8],
+        )
+        cooldown_s = orch.config.trade_cooldown_minutes * 60
+        orch._last_trade_ts = time.monotonic() - cooldown_s - 1.0
+        asyncio.run(orch._tick_trade())
+        engine.place_order.assert_called_once()
+
+    def test_mine_stores_screen_ic_direction(self, orchestrator, monkeypatch) -> None:
+        import pandas as pd
+        from src.crypto_autopilot.types import FactorCandidate, FactorLifecycle
+
+        orch = orchestrator
+        orch._panel = {
+            "close": pd.DataFrame({"BTC-USDT": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]}),
+        }
+        candidate = FactorCandidate(
+            alpha_id="test_ic_direction_store",
+            source_code="",
+            created_at=datetime.now(timezone.utc),
+            lifecycle=FactorLifecycle.DISCOVERED,
+        )
+        monkeypatch.setattr(
+            orch._factor_miner, "mine_factors", lambda **kw: [candidate],
+        )
+        monkeypatch.setattr(
+            orch, "_execute_factor",
+            lambda cand: pd.DataFrame({"BTC-USDT": [0.1, 0.2]}),
+        )
+        monkeypatch.setattr(
+            orch._factor_screen, "screen",
+            lambda factor_df, return_df: {"pass_screen": True, "ic_mean": 0.042},
+        )
+        monkeypatch.setattr(orch._factor_store, "store", lambda cand: None)
+
+        asyncio.run(orch._tick_mine())
+        assert candidate.meta.get("screen_ic_mean") == 0.042
+        assert orch._pending_candidates == [candidate]
+
+
+# ---------------------------------------------------------------------------
+# 4. Position management (take-profit / stop-loss / max holding)
+# ---------------------------------------------------------------------------
+
+
+class TestPositionManagement:
+    """Open positions are closed on TP/SL/holding triggers."""
+
+    @staticmethod
+    def _orchestrator_with_positions(orchestrator, monkeypatch, positions):
+        from unittest.mock import MagicMock
+        from src.crypto_autopilot.types import PaperPosition
+
+        orch = orchestrator
+        engine = MagicMock()
+        engine.get_positions.return_value = positions
+        engine.close_position.return_value = {"status": "ok"}
+        monkeypatch.setattr(orch, "_paper_engine", engine)
+        return orch, engine
+
+    def _position(self, pnl: float, entry_hours_ago: float = 1.0) -> PaperPosition:
+        from datetime import timedelta
+        from src.crypto_autopilot.types import PaperPosition
+
+        return PaperPosition(
+            symbol="BTC-USDT",
+            side="long",
+            quantity=0.5,
+            entry_price=100.0,
+            entry_time=datetime.now(timezone.utc) - timedelta(hours=entry_hours_ago),
+            unrealized_pnl=pnl,
+        )
+
+    def test_take_profit_closes_position(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_positions(
+            orchestrator, monkeypatch, [self._position(pnl=6.0)],
+        )
+        orch._manage_positions()
+        engine.close_position.assert_called_once_with("BTC-USDT")
+
+    def test_stop_loss_closes_position(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_positions(
+            orchestrator, monkeypatch, [self._position(pnl=-6.0)],
+        )
+        orch._manage_positions()
+        engine.close_position.assert_called_once_with("BTC-USDT")
+
+    def test_max_holding_closes_position(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_positions(
+            orchestrator, monkeypatch,
+            [self._position(pnl=0.0, entry_hours_ago=25.0)],
+        )
+        orch._manage_positions()
+        engine.close_position.assert_called_once_with("BTC-USDT")
+
+    def test_within_bands_keeps_position(self, orchestrator, monkeypatch) -> None:
+        orch, engine = self._orchestrator_with_positions(
+            orchestrator, monkeypatch,
+            [self._position(pnl=1.0, entry_hours_ago=2.0)],
+        )
+        orch._manage_positions()
+        engine.close_position.assert_not_called()
+
+    def test_manage_positions_runs_before_factor_gate(self, orchestrator, monkeypatch) -> None:
+        """Position exits fire even without active factors or signals."""
+        from unittest.mock import MagicMock
+
+        orch, engine = self._orchestrator_with_positions(
+            orchestrator, monkeypatch, [self._position(pnl=-6.0)],
+        )
+        orch._active_factors = []
+        asyncio.run(orch._tick_trade())
+        engine.close_position.assert_called_once_with("BTC-USDT")
+
+
+# ---------------------------------------------------------------------------
+# 6. Evaluation window (Phase 1: long history for statistical gates)
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateWindow:
+    """Verify _tick_evaluate prefers the long history-store window."""
+
+    @staticmethod
+    def _pending_candidate(alpha_id: str = "cand_win_01"):
+        from src.crypto_autopilot.types import FactorCandidate
+
+        return FactorCandidate(
+            alpha_id=alpha_id,
+            source_code="def compute(panel): return panel['close']",
+            created_at=datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _panel(n: int = 400, n_symbols: int = 4) -> dict:
+        import numpy as np
+        import pandas as pd
+
+        rng = np.random.default_rng(0)
+        idx = pd.date_range("2026-01-01", periods=n, freq="h")
+        close = pd.DataFrame(
+            {
+                f"S{i}": 100.0 * np.exp(np.cumsum(rng.normal(0.0001, 0.01, n)))
+                for i in range(n_symbols)
+            },
+            index=idx,
+        )
+        return {"close": close}
+
+    def test_uses_history_store_window_and_logs_it(
+        self, orchestrator, monkeypatch, caplog,
+    ) -> None:
+        """With history available the eval window log names the bar count."""
+        import logging
+
+        panel = self._panel()
+        orchestrator._pending_candidates = [self._pending_candidate()]
+        monkeypatch.setattr(
+            orchestrator._history, "get_panel",
+            lambda *a, **k: panel,
+        )
+        monkeypatch.setattr(
+            orchestrator._backtester, "run_backtest_for_factor",
+            lambda c, p: type(
+                "R", (), {"status": "ok", "metrics": {}}
+            )(),
+        )
+        monkeypatch.setattr(
+            orchestrator._overfit_gate, "evaluate",
+            lambda c, r: (True, "ok", {}),
+        )
+        with caplog.at_level(logging.INFO, logger="src.crypto_autopilot.orchestrator"):
+            asyncio.run(orchestrator._tick_evaluate())
+        assert any(
+            "eval window 1440 bars" in r.message for r in caplog.records
+        )
+
+    def test_falls_back_to_live_panel_when_history_empty(
+        self, orchestrator, monkeypatch, caplog,
+    ) -> None:
+        """An empty history store degrades to the rolling live panel."""
+        import logging
+
+        panel = self._panel()
+        orchestrator._pending_candidates = [self._pending_candidate()]
+        orchestrator._panel = panel
+        monkeypatch.setattr(
+            orchestrator._history, "get_panel",
+            lambda *a, **k: {},
+        )
+        monkeypatch.setattr(
+            orchestrator._backtester, "run_backtest_for_factor",
+            lambda c, p: type(
+                "R", (), {"status": "ok", "metrics": {}}
+            )(),
+        )
+        monkeypatch.setattr(
+            orchestrator._overfit_gate, "evaluate",
+            lambda c, r: (True, "ok", {}),
+        )
+        with caplog.at_level(logging.WARNING, logger="src.crypto_autopilot.orchestrator"):
+            asyncio.run(orchestrator._tick_evaluate())
+        assert any(
+            "history store empty; falling back to live panel" in r.message
+            for r in caplog.records
+        )

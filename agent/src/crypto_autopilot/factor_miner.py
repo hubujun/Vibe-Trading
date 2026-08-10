@@ -586,6 +586,9 @@ class FactorMiner:
         if not re.fullmatch(r"[a-z][a-z0-9_]*", short_id):
             short_id = candidate.alpha_id.replace("crypto_mined_", "cm_")
             short_id = re.sub(r"[^a-z0-9_]", "_", short_id)
+        # The registry only accepts stems up to 32 chars
+        # (``^[a-z][a-z0-9_]{0,31}$``) — truncate without leaving a stray `_`.
+        short_id = short_id[:32].rstrip("_")
 
         out_path = self._zoo_root / f"{short_id}.py"
         source = _assemble_module_source(candidate)

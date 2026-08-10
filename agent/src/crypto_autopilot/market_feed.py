@@ -1,9 +1,9 @@
 """Market data feed for the crypto_autopilot pipeline.
 
 Wraps the OKX SDK (:mod:`src.trading.connectors.okx.sdk`) to fetch OHLCV
-candlesticks for multiple trading pairs and periods. v1 uses REST polling
-(hourly/daily factors don't need sub-second data); a WebSocket streaming
-interface is stubbed for v2.
+candlesticks for multiple trading pairs and periods. v1 fetches via REST
+polling (hourly/daily factors don't need sub-second data); :meth:`stream_bars`
+provides the v2 WebSocket live-candle stream for real-time signals.
 
 Incremental caching reuses the opt-in ``VIBE_TRADING_DATA_CACHE`` mechanism
 from :mod:`backtest.loaders.base`: when enabled, fetched bars are persisted
@@ -13,8 +13,11 @@ history accumulates without re-downloading settled data.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +43,42 @@ _BAR_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 
 #: Sentinel index column name so the DatetimeIndex survives a parquet round-trip.
 _CACHE_INDEX_COL: str = "_ts"
+
+#: OKX public WebSocket endpoints, keyed by profile (live / paper/demo).
+_WS_PUBLIC_URIS: dict[str, str] = {
+    "live": "wss://ws.okx.com:8443/ws/v5/public",
+    "paper": "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999",
+}
+
+#: OKX candle channel names for supported bar sizes.
+_CANDLE_CHANNELS: dict[str, str] = {
+    "1m": "candle1m", "3m": "candle3m", "5m": "candle5m",
+    "15m": "candle15m", "30m": "candle30m", "1h": "candle1h",
+    "2h": "candle2h", "4h": "candle4h", "6h": "candle6h",
+    "12h": "candle12h", "1d": "candle1d", "1w": "candle1w",
+    "1M": "candle1M", "3M": "candle3M",
+}
+
+#: OKX candle array field order in WebSocket data items.
+_WS_CANDLE_FIELDS: tuple[str, ...] = (
+    "time", "open", "high", "low", "close",
+    "volume", "volume_ccy", "volume_ccy_quote", "confirm",
+)
+
+#: Reconnect backoff bounds for the WebSocket loop.
+_WS_RECONNECT_MIN_S: float = 1.0
+_WS_RECONNECT_MAX_S: float = 60.0
+
+
+def _ws_bar_unconfirmed(bar: list[Any]) -> bool:
+    """Return True when an OKX WS candle array is still forming.
+
+    OKX marks a candle with ``confirm == "1"`` once it is settled; any
+    other value (``"0"`` or missing) means the bar is still in progress.
+    """
+    if len(bar) < len(_WS_CANDLE_FIELDS):
+        return True
+    return str(bar[-1]) != "1"
 
 
 class MarketFeed:
@@ -158,21 +197,81 @@ class MarketFeed:
         self,
         symbol: str,
         period: str = "1d",
-    ) -> None:
-        """Stream bars via WebSocket (v2 placeholder).
+        *,
+        only_confirmed: bool = True,
+    ) -> AsyncIterator[pd.DataFrame]:
+        """Stream live candlesticks for one symbol over OKX public WebSocket.
 
-        v1 uses REST polling (factors operate on hourly/daily bars). The
-        WebSocket interface will be implemented in v2 for sub-second data
-        and real-time signal execution.
+        Subscribes to the ``candle<period>`` public channel and yields a
+        one-row DataFrame (``[open, high, low, close, volume]``, DatetimeIndex)
+        per received bar. With ``only_confirmed`` (default), in-progress bars
+        (``confirm == "0"``) are skipped, so every yield is a settled bar
+        suitable for causal factor updates.
+
+        The stream reconnects with exponential backoff on transport errors
+        (a 24/7 loop must survive network blips); a subscription error from
+        OKX (e.g. unknown instrument) ends the stream instead.
 
         Args:
-            symbol: OKX instrument id.
-            period: Bar size.
+            symbol: OKX instrument id, e.g. ``"BTC-USDT"``.
+            period: Bar size (``1m/5m/15m/30m/1h/4h/1d/1w``), default ``1d``.
+            only_confirmed: Skip in-progress (unconfirmed) bars when ``True``.
+
+        Yields:
+            One-row DataFrame per received bar, ascending by timestamp.
 
         Raises:
-            NotImplementedError: Always — WebSocket upgrade is planned for v2.
+            ValueError: When *period* has no OKX candle channel.
         """
-        raise NotImplementedError("WebSocket 升级在 v2")
+        channel = _CANDLE_CHANNELS.get(period)
+        if channel is None:
+            raise ValueError(
+                f"unsupported bar size {period!r} for WebSocket streaming"
+            )
+        uri = _WS_PUBLIC_URIS.get(
+            getattr(self._okx_config, "profile", "live"),
+            _WS_PUBLIC_URIS["live"],
+        )
+        subscribe = json.dumps(
+            {"op": "subscribe", "args": [{"channel": channel, "instId": symbol}]}
+        )
+
+        # Import here so REST-only callers never pay the websockets import.
+        import websockets
+
+        backoff = _WS_RECONNECT_MIN_S
+        while True:
+            try:
+                async with websockets.connect(uri) as ws:
+                    await ws.send(subscribe)
+                    backoff = _WS_RECONNECT_MIN_S
+                    async for raw in ws:
+                        msg = json.loads(raw)
+                        if msg.get("event") == "error":
+                            logger.error(
+                                "OKX WS subscription error: %s",
+                                msg.get("msg") or msg,
+                            )
+                            return
+                        data = msg.get("data")
+                        if not data:
+                            continue
+                        for bar in data:
+                            df = self._ws_bar_to_dataframe(bar, channel)
+                            if df.empty:
+                                continue
+                            if only_confirmed and _ws_bar_unconfirmed(bar):
+                                continue
+                            yield df
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — reconnect on transport errors
+                logger.warning(
+                    "OKX WS stream for %s %s dropped (%s); reconnecting "
+                    "in %.0fs", symbol, period, exc, backoff,
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, _WS_RECONNECT_MAX_S)
 
     # ------------------------------------------------------------------
     # Internal: raw fetch + rate limiting
@@ -209,6 +308,28 @@ class MarketFeed:
         if elapsed < self._min_interval_s:
             time.sleep(self._min_interval_s - elapsed)
         self._last_request_ts = time.monotonic()
+
+    def _ws_bar_to_dataframe(self, bar: list[Any], channel: str) -> pd.DataFrame:
+        """Convert one OKX WS candle array to a one-row DataFrame.
+
+        OKX WebSocket candles arrive as arrays (``[ts, o, h, l, c, vol, ...]``)
+        rather than the dicts returned by the REST SDK, so the fields are
+        zipped onto names before the shared :meth:`_bars_to_dataframe` path.
+
+        Args:
+            bar: OKX candle array from a ``data`` payload.
+            channel: The subscribed channel name (for debug only).
+
+        Returns:
+            One-row DataFrame (or empty DataFrame with canonical columns
+            when the array does not parse).
+        """
+        if not isinstance(bar, list) or len(bar) < len(_WS_CANDLE_FIELDS):
+            logger.warning("unexpected WS candle payload on %s: %r", channel, bar)
+            return pd.DataFrame(columns=list(_BAR_COLUMNS))
+        return self._bars_to_dataframe(
+            [dict(zip(_WS_CANDLE_FIELDS, bar))]
+        )
 
     @staticmethod
     def _bars_to_dataframe(bars: list[dict[str, Any]]) -> pd.DataFrame:

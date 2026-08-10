@@ -16,6 +16,9 @@ const Settings = lazy(() =>
 const Runtime = lazy(() =>
   import("@/pages/Runtime").then((m) => ({ default: m.Runtime })),
 );
+const Autopilot = lazy(() =>
+  import("@/pages/Autopilot").then((m) => ({ default: m.Autopilot })),
+);
 const Scheduled = lazy(() =>
   import("@/pages/Scheduled").then((m) => ({ default: m.Scheduled })),
 );
@@ -30,6 +33,9 @@ const AlphaZoo = lazy(() =>
 );
 const OptionsLab = lazy(() =>
   import("@/pages/OptionsLab").then((m) => ({ default: m.OptionsLab })),
+);
+const PortfolioStudio = lazy(() =>
+  import("@/pages/PortfolioStudio").then((m) => ({ default: m.PortfolioStudio })),
 );
 
 function PageLoader() {
@@ -56,6 +62,7 @@ export const router = createBrowserRouter([
       { path: "/about", element: wrap(Home) },
       { path: "/agent", element: wrap(Agent) },
       { path: "/runtime", element: wrap(Runtime) },
+      { path: "/autopilot", element: wrap(Autopilot) },
       { path: "/scheduled", element: wrap(Scheduled) },
       { path: "/reports", element: wrap(Reports) },
       { path: "/settings", element: wrap(Settings) },
@@ -67,6 +74,8 @@ export const router = createBrowserRouter([
       { path: "/alpha-zoo/bench", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/compare", element: wrap(AlphaZoo) },
       { path: "/alpha-zoo/:alphaId", element: wrap(AlphaZoo) },
+      { path: "/options-lab", element: wrap(OptionsLab) },
+      { path: "/portfolio-studio", element: wrap(PortfolioStudio) },
     ],
   },
 ]);

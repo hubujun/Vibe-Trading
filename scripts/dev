@@ -34,6 +34,11 @@ Commands:
   logs [service]     Tail logs for backend, frontend, or all
   open               Open the frontend in the default browser
   urls               Print local dev URLs
+  autopilot-start    Start the autopilot loop (used by launchd or manually)
+  backend-start      Start the API backend directly (used by launchd)
+  install-launchd    Install launchd agents for 24/7 autopilot + backend
+  uninstall-launchd  Uninstall launchd agents
+  launchd-status     Show launchd service status
 
 Environment:
   VIBE_BACKEND_PORT   Backend port (default: 8899)
@@ -164,6 +169,21 @@ start_backend() {
     --port "$BACKEND_PORT"
 }
 
+# Direct (exec-style) starters used by launchd agents: the shell is replaced
+# so launchd's KeepAlive watches the real server process, not a shell wrapper.
+cmd_autopilot_start() {
+  cd "$ROOT/agent"
+  # -u: launchd redirects stdio to a log file; unbuffered keeps diagnostics live.
+  exec env PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -u -c 'from src.providers.llm import _ensure_dotenv; _ensure_dotenv(); import cli, sys; raise SystemExit(cli.main(sys.argv[1:]))' autopilot start
+}
+
+cmd_backend_start() {
+  cd "$ROOT/agent"
+  exec env PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -u -c 'import cli, sys; raise SystemExit(cli.main(sys.argv[1:]))' serve \
+    --host "$BACKEND_HOST" \
+    --port "$BACKEND_PORT"
+}
+
 start_frontend() {
   if ! is_running frontend && url_ok "$(service_url frontend)"; then
     rm -f "$(pid_file frontend)"
@@ -269,6 +289,72 @@ API docs: http://127.0.0.1:$BACKEND_PORT/docs
 URLS
 }
 
+LAUNCHD_DIR="$ROOT/scripts/launchd"
+LAUNCHD_TARGET="$HOME/Library/LaunchAgents"
+AUTOPILOT_PLIST="com.vibetrading.autopilot.plist"
+BACKEND_PLIST="com.vibetrading.backend.plist"
+
+render_plist() {
+  local src="$1" dst="$2"
+  "$PYTHON_BIN" - "$src" "$dst" "$ROOT" "$PYTHON_BIN" "$HOME" <<'PY'
+import sys
+src, dst, root, python_bin, home = sys.argv[1:6]
+content = open(src, encoding="utf-8").read()
+content = content.replace("@ROOT@", root).replace("@PYTHON@", python_bin).replace("@HOME@", home)
+open(dst, "w", encoding="utf-8").write(content)
+print(dst)
+PY
+}
+
+cmd_install_launchd() {
+  mkdir -p "$LAUNCHD_TARGET"
+
+  # Stop any manually-started autopilot / backend first so launchd's
+  # KeepAlive does not race a second instance of the same service.
+  local apid
+  apid="$(pgrep -f 'autopilot start' | head -1 || true)"
+  if [[ -n "$apid" ]]; then
+    printf "stopping manually-started autopilot (pid %s)...\n" "$apid"
+    kill "$apid" 2>/dev/null || true
+  fi
+  stop_service backend || true
+
+  render_plist "$LAUNCHD_DIR/$AUTOPILOT_PLIST.in" "$LAUNCHD_TARGET/$AUTOPILOT_PLIST"
+  render_plist "$LAUNCHD_DIR/$BACKEND_PLIST.in" "$LAUNCHD_TARGET/$BACKEND_PLIST"
+
+  for plist in "$AUTOPILOT_PLIST" "$BACKEND_PLIST"; do
+    local label="${plist%.plist}"
+    if launchctl list "$label" >/dev/null 2>&1 || \
+       [[ -f "$LAUNCHD_TARGET/$plist" ]]; then
+      launchctl unload "$LAUNCHD_TARGET/$plist" 2>/dev/null || true
+    fi
+    launchctl load -w "$LAUNCHD_TARGET/$plist"
+  done
+
+  sleep 3
+  cmd_launchd_status
+}
+
+cmd_uninstall_launchd() {
+  for plist in "$AUTOPILOT_PLIST" "$BACKEND_PLIST"; do
+    if [[ -f "$LAUNCHD_TARGET/$plist" ]]; then
+      launchctl unload "$LAUNCHD_TARGET/$plist" 2>/dev/null || true
+      rm -f "$LAUNCHD_TARGET/$plist"
+    fi
+  done
+  printf "launchd agents uninstalled\n"
+}
+
+cmd_launchd_status() {
+  for label in com.vibetrading.autopilot com.vibetrading.backend; do
+    if launchctl list "$label" >/dev/null 2>&1; then
+      printf "%-30s loaded\n" "$label"
+    else
+      printf "%-30s not loaded\n" "$label"
+    fi
+  done
+}
+
 case "${1:-}" in
   up) cmd_up ;;
   stop) cmd_stop ;;
@@ -277,6 +363,11 @@ case "${1:-}" in
   logs) shift; cmd_logs "${1:-all}" ;;
   open) cmd_open ;;
   urls) cmd_urls ;;
+  autopilot-start) cmd_autopilot_start ;;
+  backend-start) cmd_backend_start ;;
+  install-launchd) cmd_install_launchd ;;
+  uninstall-launchd) cmd_uninstall_launchd ;;
+  launchd-status) cmd_launchd_status ;;
   -h|--help|help|"") usage ;;
   *)
     printf "unknown command: %s\n\n" "$1" >&2

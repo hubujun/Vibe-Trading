@@ -159,7 +159,7 @@ class HealthMonitor:
     # Pipeline-state durability
     # ------------------------------------------------------------------
 
-    def save_pipeline_state(self, state: PipelineState) -> None:
+    def save_pipeline_state(self, state: PipelineState, regime: Any | None = None) -> None:
         """Atomically persist *state* so a crash can never corrupt it.
 
         Writes JSON to a same-directory temp file, ``fsync`` s it, then
@@ -175,8 +175,14 @@ class HealthMonitor:
 
         Args:
             state: The pipeline snapshot to commit.
+            regime: Optional market-regime classification (Phase 3) attached
+                to the persisted snapshot so restart-time observers can read
+                the latest regime without re-classifying. ``None`` omits the
+                key, keeping legacy state files readable.
         """
         payload = _state_to_dict(state)
+        if regime:
+            payload["regime"] = regime
         self._atomic_write_json(self._state_path, payload)
 
     def load_pipeline_state(self) -> PipelineState | None:
@@ -274,6 +280,7 @@ def _state_to_dict(state: PipelineState) -> dict[str, Any]:
         "last_tick_at": state.last_tick_at.isoformat() if state.last_tick_at else None,
         "tick_count": state.tick_count,
         "updated_at": state.updated_at.isoformat() if state.updated_at else None,
+        "regime": state.regime,
     }
 
 
@@ -296,4 +303,5 @@ def _state_from_dict(data: dict[str, Any]) -> PipelineState:
         last_tick_at=datetime.fromisoformat(last_tick) if last_tick else None,
         tick_count=data["tick_count"],
         updated_at=datetime.fromisoformat(updated) if updated else None,
+        regime=data.get("regime"),
     )

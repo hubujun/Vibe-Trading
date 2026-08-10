@@ -295,6 +295,48 @@ export const api = {
   // Read the persistent runtime status across all authorized brokers (SPEC §7.5).
   // Polled by the RunnerStatus panel; a plain authenticated GET, never a chat message.
   getLiveStatus: (signal?: AbortSignal) => request<LiveStatus>("/live/status", { signal }),
+  getAutopilotStatus: (signal?: AbortSignal) =>
+    request<AutopilotStatus>("/api/autopilot/status", { signal }),
+  getAutopilotTrades: (signal?: AbortSignal) =>
+    request<AutopilotTrades>("/api/autopilot/trades", { signal }),
+  getAutopilotFactors: (signal?: AbortSignal) =>
+    request<AutopilotFactorList>("/api/autopilot/factors", { signal }),
+  getAutopilotPerformance: (signal?: AbortSignal) =>
+    request<AutopilotPerformance>("/api/autopilot/performance", { signal }),
+  getAutopilotPositions: (signal?: AbortSignal) =>
+    request<AutopilotPositionsResponse>("/api/autopilot/positions", { signal }),
+  getOptionsSurface: (ticker: string, signal?: AbortSignal) =>
+    request<OptionsSurface>(
+      `/api/options-lab/surface?ticker=${encodeURIComponent(ticker)}`,
+      { signal },
+    ),
+  getOptionsChain: (ticker: string, expiration?: number, signal?: AbortSignal) => {
+    const exp = expiration ? `&expiration=${expiration}` : "";
+    return request<OptionsChain>(
+      `/api/options-lab/chain?ticker=${encodeURIComponent(ticker)}${exp}`,
+      { signal },
+    );
+  },
+  portfolioXray: (payload: PortfolioXrayRequest) =>
+    request<PortfolioXrayReport>("/api/portfolio/xray", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  portfolioRebalanceNotes: (payload: PortfolioRebalanceNotesRequest) =>
+    request<PortfolioRebalanceNotes>("/api/portfolio/rebalance-notes", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  portfolioApplyConstraints: (payload: PortfolioConstraintsRequest) =>
+    request<PortfolioConstraintsResult>("/api/portfolio/constraints", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  portfolioOptimize: (payload: PortfolioOptimizeRequest) =>
+    request<PortfolioOptimizeResult>("/api/portfolio/optimize", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   verifyConnector: (profileId: string) =>
     request<ConnectorVerifyResponse>(`/live/connectors/${encodeURIComponent(profileId)}/verify?force=true`, {
       method: "POST",
@@ -1333,6 +1375,330 @@ export interface LiveBrokerStatus {
 export interface LiveStatus {
   brokers: LiveBrokerStatus[];
   global_halted: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Crypto autopilot status (GET /api/autopilot/status)
+// ---------------------------------------------------------------------------
+
+export interface AutopilotPipeline {
+  phase: string;
+  active_factor_id: string | null;
+  tick_count: number;
+  last_tick_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AutopilotHealth {
+  alive: boolean;
+  stale: boolean;
+  heartbeat_ms: number | null;
+}
+
+export interface AutopilotHalt {
+  halted: boolean;
+  reason: string | null;
+  tripped_by: string | null;
+  tripped_at: string | null;
+}
+
+export interface AutopilotCounter {
+  date: string;
+  count: number;
+}
+
+export interface AutopilotConfigSummary {
+  enabled: boolean;
+  pairs: string[];
+  max_order_notional_usd: number;
+  max_total_exposure_usd: number;
+  max_trades_per_day: number;
+  mine_interval_hours: number;
+  evaluate_interval_hours: number;
+  trade_interval_minutes: number;
+  feedback_interval_hours: number;
+}
+
+export interface AutopilotDataHealthSymbol {
+  latest_ts: string | null;
+  lag_hours: number | null;
+}
+
+export interface AutopilotDataHealth {
+  updated_at: string | null;
+  stale_symbols: string[];
+  symbols: Record<string, AutopilotDataHealthSymbol>;
+}
+
+export interface AutopilotStatus {
+  pipeline: AutopilotPipeline;
+  health: AutopilotHealth;
+  halt: AutopilotHalt;
+  counter: AutopilotCounter;
+  config: AutopilotConfigSummary;
+  data_health: AutopilotDataHealth;
+}
+
+/** One fill from the unified paper/live trade ledger (`GET /api/autopilot/trades`). */
+export interface AutopilotTradeRecord {
+  ts: string | null;
+  engine: string;
+  symbol: string;
+  side: string;
+  quantity: number | null;
+  price: number | null;
+  notional: number;
+  realized_pnl: number | null;
+  alpha_id: string | null;
+  fee: number | null;
+  market: string | null;
+}
+
+export interface AutopilotTrades {
+  trades: AutopilotTradeRecord[];
+  count: number;
+}
+
+/** One factor's lifecycle snapshot (`GET /api/autopilot/factors`). */
+export interface AutopilotFactorInfo {
+  alpha_id: string;
+  lifecycle: string;
+  screen_ic_mean: number | null;
+  ic_mean: number | null;
+  ir: number | null;
+  alpha_t_full: number | null;
+  alpha_t_train: number | null;
+  alpha_t_test: number | null;
+  category: string | null;
+}
+
+export interface AutopilotRetiredFactor {
+  alpha_id: string;
+  retired_at: string | null;
+  reason: string | null;
+}
+
+export interface AutopilotFactorList {
+  active: AutopilotFactorInfo[];
+  pending: string[];
+  retired: AutopilotRetiredFactor[];
+  zoo: string[];
+  updated_at: string | null;
+}
+
+/** One open paper-trading position (`GET /api/autopilot/positions`). */
+export interface AutopilotPosition {
+  symbol: string;
+  side: string;
+  quantity: number;
+  entry_price: number;
+  entry_time: string | null;
+  unrealized_pnl: number;
+}
+
+export interface AutopilotPositionsResponse {
+  positions: AutopilotPosition[];
+  count: number;
+}
+
+/** One day of realized paper P&L (`GET /api/autopilot/performance`). */
+export interface AutopilotDailyPnl {
+  date: string;
+  pnl_usd: number;
+}
+
+export interface AutopilotPerformance {
+  total_trades: number;
+  open_positions: number;
+  open_exposure_usd: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  realized_pnl_usd: number;
+  sharpe: number;
+  max_drawdown: number;
+  daily_pnl: AutopilotDailyPnl[];
+  benchmark_symbol?: string | null;
+  benchmark_return_pct?: number | null;
+  avg_slippage_bps?: number | null;
+}
+
+/** One strike on the Options Lab vol surface for a single expiration. */
+export interface OptionsContractPoint {
+  strike: number;
+  moneyness: number | null;
+  iv_call: number | null;
+  iv_put: number | null;
+  delta_call: number | null;
+  delta_put: number | null;
+}
+
+export interface OptionsSurfaceExpiry {
+  expiration: number;
+  days_to_expiry: number;
+  atm_iv: number | null;
+  skew: number | null;
+  contracts: OptionsContractPoint[];
+}
+
+export interface OptionsSurface {
+  ticker: string;
+  spot: number | null;
+  as_of: string;
+  risk_free_rate: number;
+  expirations: OptionsSurfaceExpiry[];
+}
+
+/** One contract row of the Options Lab Greeks ladder. */
+export interface OptionsChainContract {
+  type: string;
+  strike: number;
+  iv: number | null;
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  open_interest: number | null;
+  volume: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+}
+
+export interface OptionsChain {
+  ticker: string;
+  spot: number | null;
+  expiration: number | null;
+  days_to_expiry: number | null;
+  contracts: OptionsChainContract[];
+}
+
+/** Portfolio Studio: risk x-ray request body (closes are symbol → price lists). */
+export interface PortfolioXrayRequest {
+  closes: Record<string, number[]>;
+  weights: Record<string, number>;
+  dates?: string[];
+  periods_per_year?: number;
+  var_levels?: number[];
+  min_history?: number;
+}
+
+/** Portfolio Studio: risk x-ray report (engine guarantees strict-JSON safety). */
+export interface PortfolioXrayReport {
+  inputs: {
+    symbols: string[];
+    weights: Record<string, number>;
+    aligned_days: number;
+    return_observations: number;
+    first_date: string;
+    last_date: string;
+  };
+  concentration: {
+    hhi: number | null;
+    effective_n: number | null;
+    top1_weight: number | null;
+    top3_weight: number | null;
+  };
+  volatility: {
+    daily_vol: number | null;
+    annualized_vol: number | null;
+    downside_deviation_annualized: number | null;
+  };
+  drawdown: {
+    max_drawdown: number | null;
+    max_drawdown_start: string | null;
+    max_drawdown_trough: string | null;
+  };
+  tail_risk: {
+    var_95: number | null;
+    expected_shortfall_95: number | null;
+    var_99: number | null;
+    expected_shortfall_99: number | null;
+    method: string;
+  };
+  diversification: {
+    diversification_ratio: number | null;
+    note?: string;
+  };
+  correlation: {
+    avg_pairwise_abs: number | null;
+    max_pair: { symbols: string[]; corr: number } | null;
+    beta_to_equal_weight: number | null;
+    note?: string;
+  };
+  skipped: { symbol: string; reason: string }[];
+  warnings: string[];
+}
+
+/** Portfolio Studio: rebalance-notes request (date → symbol → target weight). */
+export interface PortfolioRebalanceNotesRequest {
+  target_pos: Record<string, Record<string, number>>;
+  top_n?: number;
+}
+
+export interface PortfolioRebalanceMove {
+  code: string;
+  from: number;
+  to: number;
+  delta: number;
+}
+
+export interface PortfolioRebalance {
+  date: string;
+  turnover: number;
+  entries: { code: string; weight: number }[];
+  exits: { code: string; weight: number }[];
+  top_moves: PortfolioRebalanceMove[];
+}
+
+export interface PortfolioRebalanceNotes {
+  rebalances: PortfolioRebalance[];
+  summary: {
+    rebalance_count: number;
+    turnover_total: number;
+    turnover_mean: number;
+    turnover_max: number;
+    largest_rebalance_date: string | null;
+  };
+}
+
+/** Portfolio Studio: constraint application request. */
+export interface PortfolioConstraintsRequest {
+  frame: Record<string, Record<string, number>>;
+  constraints: Record<string, unknown>[];
+}
+
+export interface PortfolioConstraintsResult {
+  frame: Record<string, Record<string, number>>;
+  summary: {
+    dates: number;
+    assets: string[];
+    constraints: string[];
+    adjusted_cells: number;
+  };
+}
+
+/** Portfolio Studio: turnover-aware optimizer request. */
+export interface PortfolioOptimizeRequest {
+  returns: Record<string, Record<string, number>>;
+  positions: Record<string, Record<string, number>>;
+  lookback?: number;
+  risk_aversion?: number;
+  turnover_penalty?: number;
+  max_per_name?: number | null;
+  groups?: Record<string, string>;
+  max_per_group?: Record<string, number>;
+}
+
+export interface PortfolioOptimizeResult {
+  frame: Record<string, Record<string, number>>;
+  summary: {
+    optimizer: string;
+    lookback: number;
+    turnover_penalty: number;
+    dates: number;
+    assets: string[];
+  };
 }
 
 /** Response of `POST /live/runner/start|stop`. */
