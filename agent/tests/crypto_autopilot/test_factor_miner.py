@@ -247,6 +247,45 @@ class TestEnsureUniqueId:
 
 
 # ---------------------------------------------------------------------------
+# 5b. write_factor — short-id length cap
+# ---------------------------------------------------------------------------
+
+
+class TestWriteFactorShortId:
+    """The zoo stem must satisfy the registry's 32-char token limit."""
+
+    @pytest.fixture
+    def miner(self, tmp_path) -> FactorMiner:
+        return FactorMiner(llm_provider=lambda _prompt: "", zoo_root=tmp_path)
+
+    def test_overlong_alpha_id_truncated_to_32_chars(
+        self, miner: FactorMiner, tmp_path,
+    ) -> None:
+        from src.factors.registry import _ID_RE
+
+        long_id = "crypto_mined_microstructure_volume_range_alignment"
+        candidate = FactorCandidate(
+            alpha_id=long_id,
+            source_code="def compute(panel): pass",
+            created_at=datetime.now(timezone.utc),
+        )
+        out = miner.write_factor(candidate)
+        assert _ID_RE.fullmatch(out.stem), f"stem {out.stem!r} violates token rule"
+        assert len(out.stem) <= 32
+        # Truncation keeps the semantic prefix, not a random suffix.
+        assert out.stem.startswith("microstructure_volume_range")
+
+    def test_valid_short_id_kept_unchanged(self, miner: FactorMiner, tmp_path) -> None:
+        candidate = FactorCandidate(
+            alpha_id="crypto_mined_volume_momentum",
+            source_code="def compute(panel): pass",
+            created_at=datetime.now(timezone.utc),
+        )
+        out = miner.write_factor(candidate)
+        assert out.stem == "volume_momentum"
+
+
+# ---------------------------------------------------------------------------
 # 6. End-to-end mine_factors with a stub LLM provider
 # ---------------------------------------------------------------------------
 
