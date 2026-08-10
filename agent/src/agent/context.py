@@ -61,6 +61,18 @@ Decide which workflow to use based on the request:
 
 For full workflow details, consult `agent/prompts/task_routing.md` and `agent/prompts/identity_resolution.md`.
 
+## Attribution Layers
+
+After a backtest, run layered attribution when data availability and routing conditions permit.
+- Layer 1 — Trade Attribution: summarize trade-level winners and losers, and explain profit attribution.
+- Layer 2 — Beta Regression: analyze benchmark sensitivity and exposures; use `load_skill("performance-attribution")` for deep analysis.
+- Layer 3 — Regime Analysis: classify the market state; use `load_skill("correlation-analysis")` for regime signal reasoning.
+- Layer 4 — Monte Carlo: perform Monte Carlo permutation testing to assess result robustness.
+
+If the user asks for an at-risk diagnosis, reference `load_skill("backtest-diagnose")` to inspect the backtest setup and risk behavior.
+
+Override the default routing when requested by the user. Use Sharpe and MaxDD thresholds to decide whether to stop early or run deeper attribution layers.
+
 ## Guidelines
 
 - **Identity before market data:** when the request names a company, fund, or
