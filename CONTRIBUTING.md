@@ -10,6 +10,29 @@ For general project setup (`pip install -e ".[dev]"`, dev servers,
 `pytest --ignore=agent/tests/e2e_backtest`), see the README. For bug reports
 and feature requests, use the GitHub issue templates.
 
+## Development Setup
+
+Run the one-command setup to install the development dependencies **and**
+enable the pre-commit hook so commits automatically run the focused test
+suite matching your changed file types:
+
+```bash
+scripts/setup-dev.sh
+```
+
+Equivalently, do it manually:
+
+```bash
+pip install -e ".[dev]"
+git config core.hooksPath scripts/git-hooks
+```
+
+The hook (see `scripts/git-hooks/pre-commit`) routes Python changes to
+`pytest` and frontend changes to `vitest`, with a dedicated order-safety gate
+for high-risk broker/order changes. Verify it is active with
+`git config core.hooksPath` (should print `scripts/git-hooks`). To skip it in
+a one-off emergency, use `git commit --no-verify`.
+
 For AI-assisted or automation-assisted contributions, also see
 [`AGENT_CONTRIBUTOR_GUIDE.md`](AGENT_CONTRIBUTOR_GUIDE.md). It summarizes safe
 local checks, higher-risk broker/MCP/credential surfaces, and the expected PR
