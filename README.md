@@ -887,6 +887,7 @@ source .venv/bin/activate          # Linux / macOS
 # .venv\Scripts\Activate.ps1       # Windows PowerShell
 
 pip install -e .
+git config core.hooksPath scripts/git-hooks   # enable pre-commit validation
 cp agent/.env.example agent/.env   # Edit — set your LLM provider API key
 vibe-trading                       # Launch interactive TUI
 ```

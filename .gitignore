@@ -98,9 +98,6 @@ agent/tests/test_e2e_*.py
 NOTES.md
 .workbuddy/
 
-# Agent tool aliases (auto-generated mirror of CLAUDE.md)
-AGENTS.md
-
 .DS_Store
 
 # Desktop shell build outputs

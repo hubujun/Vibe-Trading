@@ -97,6 +97,19 @@ jobs:
         # tests skip without statsmodels/arch, and skipped is not tested.
         run: pip install -e ".[dev,openbb,stats]"
 
+      - name: Verify pre-commit hook enablement route (informational)
+        # Exercises the documented dev-setup command (git config core.hooksPath
+        # scripts/git-hooks) and confirms the hook script is present. The hook
+        # itself runs only locally on commits; this step is a non-blocking hint.
+        run: |
+          git config core.hooksPath scripts/git-hooks
+          actual="$(git config core.hooksPath)"
+          if [ "$actual" = "scripts/git-hooks" ] && [ -x scripts/git-hooks/pre-commit ]; then
+            echo "pre-commit hook route OK: core.hooksPath=$actual"
+          else
+            echo "::warning::pre-commit hook route mismatch: core.hooksPath=${actual:-unset}, hook executable=$( [ -x scripts/git-hooks/pre-commit ] && echo yes || echo no )"
+          fi
+
       - name: Verify optional extras under test are importable
         # Fails loudly if an extra stops resolving, instead of letting its
         # suite silently degrade to skips.
