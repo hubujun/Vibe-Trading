@@ -16,6 +16,16 @@ The agent’s grounding system enforces that market consumers only use identitie
 - Equivalent spellings like `BTC-USDT` / `BTC/USDT` or `.SS` / `.SH` may normalize to the same identity, but the next market tool must still consume the locked canonical form from the resolver result.
 - Do not silently change a listed security into a private-company workflow.
 
+### Same issuer, second venue (e.g. TSX + US listing)
+
+A company listed on two exchanges is **two identities**, not one. If the locked identity is `BLDP.TO` (TSX, CAD) and you also need the US listing `BLDP.US` (NASDAQ) for an FX or venue cross-check, resolve the extra venue before touching it:
+
+1. Call `search_symbol("BLDP.US")` in its own assistant turn and wait for the result.
+2. Use the exact returned canonical symbol/venue for the follow-up market call.
+3. Never bundle two venues of one issuer into a single `get_market_data` call unless both are already locked — `get_market_data(codes=["BLDP.TO", "BLDP.US"])` fails with `identity_mismatch` because only `BLDP.TO` is authorized.
+
+If a `identity_mismatch` message mentions "second venue of ...", the guard is telling you exactly which `search_symbol` query to run next — run it, do not retry the same unauthorized call.
+
 ## Example flow
 
 1. User asks: “What's the latest price for TANTALUS SYSTEMS HOLDINGS INC?”
