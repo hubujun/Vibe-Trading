@@ -8,7 +8,7 @@
 
 - **上游**：HKUDS/Vibe-Trading v0.1.13
 - **Fork**：hubujun/Vibe-Trading
-- **技术栈**：Python 3.11+ / FastAPI (8899) / Vue 3 + Vite (5899) / Docker Compose
+- **技术栈**：Python 3.11+ / FastAPI (8899) / React 19 + Vite (5899) / Docker Compose
 - **测试**：pytest（`agent/tests/`）
 
 ## 架构快照
@@ -31,7 +31,7 @@ Vibe-Trading/
 │       │       └── ...        # alpaca, binance, futu, tiger, ...
 │       ├── live/              # 实盘交易模块
 │       └── config/            # 配置加载
-├── frontend/                  # Vue 3 + Vite 前端
+├── frontend/                  # React 19 + Vite 前端
 ├── docs/
 │   ├── adr/                   # 架构决策记录
 │   │   ├── adr-001-okx-checkstatus-credential-source-error-branch.md

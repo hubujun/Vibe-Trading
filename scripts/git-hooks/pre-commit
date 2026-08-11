@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run focused tests based on staged file types.
+# Install: git config core.hooksPath scripts/git-hooks
+# Skip:    git commit --no-verify
+
+set -euo pipefail
+
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+STAGED_TSX=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(tsx?|jsx?)$' || true)
+
+if [ -z "$STAGED_PY" ] && [ -z "$STAGED_TSX" ]; then
+  echo "[pre-commit] No staged code files — skipping tests."
+  exit 0
+fi
+
+# Prefer the repo-local virtualenv when the hook runs outside an activated
+# one (e.g. automation shells, cron) — the path has no spaces, so bare
+# expansion is safe.
+PYTEST="pytest"
+if [ -x ".venv/bin/pytest" ]; then
+  PYTEST=".venv/bin/pytest"
+fi
+
+# --- Python changes ---
+if [ -n "$STAGED_PY" ]; then
+  # Detect high-risk changes (broker / order / mandate)
+  if echo "$STAGED_PY" | grep -qE '(sdk_order|mandate|killswitch|readonly|live/)'; then
+    echo "[pre-commit] High-risk Python change detected — running order-safety gate."
+    "$PYTEST" agent/tests/test_sdk_order_gate.py \
+          agent/tests/test_mandate_enforcement.py \
+          agent/tests/test_killswitch_blocks_orders.py \
+          agent/tests/test_readonly_default.py \
+          -q --tb=short
+  else
+    echo "[pre-commit] Running focused Python tests."
+    "$PYTEST" --ignore=agent/tests/e2e_backtest \
+           --ignore=agent/tests/test_e2e_harness_v2.py \
+           --tb=short -q
+  fi
+fi
+
+# --- Frontend changes ---
+if [ -n "$STAGED_TSX" ]; then
+  echo "[pre-commit] Running frontend tests."
+  (cd frontend && npx vitest run --reporter=dot)
+fi
+
+echo "[pre-commit] All checks passed."
