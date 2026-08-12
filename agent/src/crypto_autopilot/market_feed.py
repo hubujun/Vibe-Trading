@@ -86,7 +86,7 @@ class MarketFeed:
 
     Paper-vs-live is controlled by the injected :class:`OKXConfig` profile
     (default ``"paper"``). v1 fetches via REST polling; :meth:`stream_bars`
-    is a placeholder for the v2 WebSocket upgrade.
+    provides the v2 WebSocket live-candle stream for real-time signals.
 
     Attributes:
         okx_config: OKX connector config (profile, host, credentials).

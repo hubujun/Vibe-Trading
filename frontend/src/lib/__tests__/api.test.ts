@@ -128,6 +128,75 @@ describe("api request helper", () => {
     );
   });
 
+  it("serializes options payoff params to snake_case query args", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: vi.fn(() => "remote-test-key"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+    const payoff = {
+      strategy: "bull_call_spread",
+      entry_spot: 100,
+      time_to_expiry: 0.25,
+      rate: 0.05,
+      iv: 0.3,
+      multiplier: 100,
+      net_premium: 450.5,
+      entry_commission: 0.45,
+      entry_cost: 450.95,
+      breakevens: [105.5],
+      max_profit: 545.05,
+      max_loss: -450.95,
+      profit_unbounded: false,
+      loss_unbounded: false,
+      curve: [{ spot: 50, pnl: -450.95 }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payoff), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await loadApiModule();
+
+    await expect(
+      api.getOptionsPayoff({
+        strategy: "bull_call_spread",
+        lowerStrike: 95,
+        upperStrike: 105,
+        qty: 2,
+        entrySpot: 100,
+        multiplier: 100,
+      }),
+    ).resolves.toEqual(payoff);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/options-lab/payoff?strategy=bull_call_spread&lower_strike=95&upper_strike=105&qty=2&entry_spot=100&multiplier=100",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer remote-test-key" }),
+      }),
+    );
+  });
+
+  it("omits undefined options payoff params from the query string", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ strategy: "long_straddle", curve: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await loadApiModule();
+
+    await api.getOptionsPayoff({ strategy: "long_straddle", strike: 100 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/options-lab/payoff?strategy=long_straddle&strike=100",
+      expect.anything(),
+    );
+  });
+
   it("resolves authorization errors through the active i18n key", async () => {
     vi.stubGlobal(
       "fetch",
