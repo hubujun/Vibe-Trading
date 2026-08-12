@@ -164,3 +164,108 @@ class TestChainEndpoint:
 
         assert response.status_code == 502
         assert "options chain fetch failed" in response.json()["detail"]
+
+
+class TestPayoffEndpoint:
+    def test_bull_call_spread_returns_curve_and_summary(self) -> None:
+        """A 200 with a bounded-risk payoff curve and analytic summary."""
+        response = _client().get(
+            "/api/options-lab/payoff",
+            params={
+                "strategy": "bull_call_spread",
+                "lower_strike": 95,
+                "upper_strike": 105,
+                "qty": 2,
+                "points": 101,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["strategy"] == "bull_call_spread"
+        assert body["entry_spot"] == 100.0  # mean strike default
+        assert body["profit_unbounded"] is False
+        assert body["loss_unbounded"] is False
+        assert body["max_profit"] is not None
+        assert body["max_loss"] is not None
+        assert body["net_premium"] > 0  # long spread pays a debit
+        assert len(body["breakevens"]) >= 1
+        assert len(body["curve"]) == 101
+        curve = body["curve"]
+        assert curve[0]["spot"] < curve[-1]["spot"]
+        # expiry P&L below the lower strike is the entry cost (loss)
+        assert curve[0]["pnl"] < 0
+
+    def test_long_straddle_has_unbounded_profit_tail(self) -> None:
+        """Long straddle: loss bounded below, profit unbounded above."""
+        response = _client().get(
+            "/api/options-lab/payoff",
+            params={"strategy": "long_straddle", "strike": 100},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["profit_unbounded"] is True
+        assert body["max_profit"] is None  # JSON cannot carry +inf
+        assert body["loss_unbounded"] is False
+        assert body["max_loss"] is not None
+
+    def test_iron_condor_returns_defined_risk(self) -> None:
+        response = _client().get(
+            "/api/options-lab/payoff",
+            params={
+                "strategy": "iron_condor",
+                "put_wing": 90,
+                "put_body": 95,
+                "call_body": 105,
+                "call_wing": 110,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["profit_unbounded"] is False
+        assert body["loss_unbounded"] is False
+        assert body["max_profit"] is not None and body["max_profit"] > 0
+
+    def test_missing_strategy_is_422(self) -> None:
+        response = _client().get("/api/options-lab/payoff")
+        assert response.status_code == 422
+
+    def test_unknown_strategy_is_422(self) -> None:
+        response = _client().get(
+            "/api/options-lab/payoff", params={"strategy": "nonsense"}
+        )
+        assert response.status_code == 422
+        assert "unknown strategy" in response.json()["detail"]
+
+    def test_missing_strike_parameters_are_422(self) -> None:
+        response = _client().get(
+            "/api/options-lab/payoff", params={"strategy": "long_straddle"}
+        )
+        assert response.status_code == 422
+        assert "requires strike" in response.json()["detail"]
+
+    def test_invalid_strike_ordering_is_422(self) -> None:
+        response = _client().get(
+            "/api/options-lab/payoff",
+            params={
+                "strategy": "bull_call_spread",
+                "lower_strike": 110,
+                "upper_strike": 95,
+            },
+        )
+        assert response.status_code == 422
+
+    def test_explicit_entry_spot_is_respected(self) -> None:
+        response = _client().get(
+            "/api/options-lab/payoff",
+            params={
+                "strategy": "long_straddle",
+                "strike": 100,
+                "entry_spot": 102.5,
+                "points": 51,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["entry_spot"] == 102.5
