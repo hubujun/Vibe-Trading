@@ -354,29 +354,6 @@ def _read_metrics(path: Path) -> dict:
         return {}
 
 
-def _read_metric_values(path: Path) -> dict[str, float]:
-    """Read metrics.csv as raw floats, for callers that must do arithmetic.
-
-    ``_read_metrics`` above pre-formats every value into a display string, so a
-    caller that renders a ratio as a percentage cannot use it. An empty result
-    also serves as the "this turn produced no backtest" signal.
-    """
-    if not path.exists():
-        return {}
-    try:
-        with path.open(encoding="utf-8", newline="") as handle:
-            row = next(csv.DictReader(handle), None) or {}
-    except (OSError, csv.Error):
-        return {}
-    values: dict[str, float] = {}
-    for key, value in row.items():
-        try:
-            values[str(key)] = float(value)
-        except (TypeError, ValueError):
-            continue
-    return values
-
-
 def _status_style(status: str) -> str:
     """Return a consistent Rich color for status labels."""
     return {
@@ -442,7 +419,6 @@ def _provider_key_env(provider: str | None) -> str | None:
         "nvidia-nim": "NVIDIA_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "groq": "GROQ_API_KEY",
-        "novita": "NOVITA_API_KEY",
         "dashscope": "DASHSCOPE_API_KEY",
         "qwen": "DASHSCOPE_API_KEY",
         "zhipu": "ZHIPU_API_KEY",
@@ -468,7 +444,6 @@ def _provider_base_env(provider: str | None) -> str | None:
         "nvidia-nim": "NVIDIA_BASE_URL",
         "gemini": "GEMINI_BASE_URL",
         "groq": "GROQ_BASE_URL",
-        "novita": "NOVITA_BASE_URL",
         "dashscope": "DASHSCOPE_BASE_URL",
         "qwen": "DASHSCOPE_BASE_URL",
         "zhipu": "ZHIPU_BASE_URL",
@@ -1552,19 +1527,15 @@ def cmd_run(prompt: str, max_iter: int, *, json_mode: bool = False, no_rich: boo
         _print_json_result(result)
         return _result_exit_code(result)
     _print_result(result, time.perf_counter() - start, no_rich=no_rich)
-    if result.get("run_id") and result.get("run_dir"):
-        # Point at the dashboard without starting anything. Spawning a server
-        # from a result-printing path would leave an unsupervised process behind
-        # after the command exits.
-        if _read_metric_values(Path(result["run_dir"]) / "artifacts" / "metrics.csv"):
-            hint = (
-                f"Dashboard: run `vibe-trading serve`, then open "
-                f"/runs/{result['run_id']}?view=dashboard"
-            )
+    from cli.report_server import ensure_report_server, load_backtest_metrics
+
+    if result.get("run_id") and load_backtest_metrics(result.get("run_dir")):
+        report_url = ensure_report_server(str(result["run_id"]))
+        if report_url:
             if no_rich:
-                print(hint)
+                print(f"Dashboard: {report_url}")
             else:
-                console.print(f"[dim]{hint}[/dim]")
+                console.print(f"[bold]Dashboard:[/bold] [link={report_url}]{report_url}[/link]")
     if result.get("run_id"):
         tip = f"--show {result['run_id']}  |  --continue {result['run_id']} \"...\"  |  --code {result['run_id']}  |  --pine {result['run_id']}"
         if no_rich:
@@ -3008,12 +2979,8 @@ def cmd_upload(file_path: str) -> None:
 def cmd_provider_login(provider: str) -> int:
     """Authenticate OAuth-backed LLM providers."""
     normalized = provider.strip().lower().replace("_", "-")
-    if normalized in {"copilot", "github-copilot"}:
-        return _login_copilot()
     if normalized != "openai-codex":
-        console.print(
-            "[red]Unknown OAuth provider.[/red] Supported: openai-codex, copilot"
-        )
+        console.print("[red]Unknown OAuth provider.[/red] Supported: openai-codex")
         return EXIT_USAGE_ERROR
     try:
         from src.providers.openai_codex import login_openai_codex
@@ -3044,25 +3011,6 @@ def cmd_provider_login(provider: str) -> int:
     except Exception as exc:
         console.print(f"[red]Authentication error:[/red] {exc}")
         return EXIT_RUN_FAILED
-
-
-def _login_copilot() -> int:
-    """Report supported GitHub Copilot SDK authentication options."""
-    from src.providers.copilot_auth import get_copilot_auth_status
-
-    authenticated, status = get_copilot_auth_status()
-    if authenticated:
-        console.print(
-            f"[green]Already authenticated with GitHub Copilot[/green]  [dim]{status}[/dim]"
-        )
-        return EXIT_SUCCESS
-
-    console.print(
-        "[yellow]No GitHub credential found.[/yellow]\n"
-        "Run [bold]copilot[/bold] and sign in, run [bold]gh auth login[/bold], "
-        "or set [bold]COPILOT_GITHUB_TOKEN[/bold]."
-    )
-    return EXIT_RUN_FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -5694,16 +5642,6 @@ _PROVIDER_CHOICES: list[dict[str, str | None]] = [
         "key_placeholder": "api-key...",
     },
     {
-        "label": "Novita AI",
-        "provider": "novita",
-        "key_env": "NOVITA_API_KEY",
-        "base_env": "NOVITA_BASE_URL",
-        "base_url": "https://api.novita.ai/openai",
-        "model": "moonshotai/kimi-k3",
-        "key_prefix": "sk_",
-        "key_placeholder": "sk_...",
-    },
-    {
         "label": "iFlytek Spark",
         "provider": "spark",
         "key_env": "SPARK_API_KEY",
@@ -5773,8 +5711,6 @@ def _render_env_content(config: dict[str, str]) -> str:
         "GEMINI_BASE_URL",
         "GROQ_API_KEY",
         "GROQ_BASE_URL",
-        "NOVITA_API_KEY",
-        "NOVITA_BASE_URL",
         "DASHSCOPE_API_KEY",
         "DASHSCOPE_BASE_URL",
         "ZHIPU_API_KEY",
