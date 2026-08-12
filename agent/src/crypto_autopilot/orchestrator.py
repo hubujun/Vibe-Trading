@@ -936,6 +936,25 @@ class AutopilotOrchestrator:
                 "metrics": metrics,
             })
 
+        # Phase 3+: When no active factors exist, feed retired factors to
+        # the feedback LLM so it can analyse failure patterns and produce
+        # mining hints instead of skipping feedback entirely.
+        if not factor_results and self._retired_factors:
+            for entry in self._retired_factors[-20:]:
+                factor_results.append({
+                    "alpha_id": entry.get("alpha_id", "unknown"),
+                    "lifecycle": "retired",
+                    "metrics": {
+                        "retired_reason": entry.get("reason", ""),
+                        "sharpe": 0.0,
+                    },
+                })
+            logger.info(
+                "tick_feedback: no active factors; using %d retired factors "
+                "for feedback analysis",
+                len(factor_results),
+            )
+
         if not factor_results:
             logger.debug("tick_feedback: no factor results to analyze")
             return
