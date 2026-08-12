@@ -284,6 +284,14 @@ class PaperEngine:
             total += qty * price
         return total
 
+    def orders_today(self) -> int:
+        """Return the number of buy orders placed so far today (UTC).
+
+        Exposes the persisted daily counter so plan previews can apply the
+        same quota gate before execution.
+        """
+        return self._daily_counter.count_today()
+
     def get_positions(self) -> list[PaperPosition]:
         """Return current open positions with unrealized P&L.
 
