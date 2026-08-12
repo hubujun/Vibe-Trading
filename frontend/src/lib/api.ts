@@ -317,6 +317,35 @@ export const api = {
       { signal },
     );
   },
+  getOptionsPayoff: (params: OptionsPayoffParams, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    query.set("strategy", params.strategy);
+    const fields: Array<[keyof OptionsPayoffParams, string]> = [
+      ["lowerStrike", "lower_strike"],
+      ["upperStrike", "upper_strike"],
+      ["strike", "strike"],
+      ["putWing", "put_wing"],
+      ["putBody", "put_body"],
+      ["callBody", "call_body"],
+      ["callWing", "call_wing"],
+      ["qty", "qty"],
+      ["entrySpot", "entry_spot"],
+      ["timeToExpiry", "time_to_expiry"],
+      ["rate", "rate"],
+      ["iv", "iv"],
+      ["multiplier", "multiplier"],
+      ["commissionRate", "commission_rate"],
+      ["points", "points"],
+    ];
+    for (const [key, wire] of fields) {
+      const value = params[key];
+      if (value != null) query.set(wire, String(value));
+    }
+    return request<OptionsPayoff>(
+      `/api/options-lab/payoff?${query.toString()}`,
+      { signal },
+    );
+  },
   portfolioXray: (payload: PortfolioXrayRequest) =>
     request<PortfolioXrayReport>("/api/portfolio/xray", {
       method: "POST",
@@ -1571,6 +1600,50 @@ export interface OptionsChain {
   expiration: number | null;
   days_to_expiry: number | null;
   contracts: OptionsChainContract[];
+}
+
+/** Options Lab payoff analyzer: strategy template + optional overrides. */
+export interface OptionsPayoffParams {
+  strategy: "bull_call_spread" | "long_straddle" | "iron_condor";
+  lowerStrike?: number;
+  upperStrike?: number;
+  strike?: number;
+  putWing?: number;
+  putBody?: number;
+  callBody?: number;
+  callWing?: number;
+  qty?: number;
+  entrySpot?: number;
+  timeToExpiry?: number;
+  rate?: number;
+  iv?: number;
+  multiplier?: number;
+  commissionRate?: number;
+  points?: number;
+}
+
+/** One point of the expiry payoff curve. */
+export interface OptionsPayoffPoint {
+  spot: number;
+  pnl: number;
+}
+
+export interface OptionsPayoff {
+  strategy: string;
+  entry_spot: number;
+  time_to_expiry: number;
+  rate: number;
+  iv: number;
+  multiplier: number;
+  net_premium: number;
+  entry_commission: number;
+  entry_cost: number;
+  breakevens: number[];
+  max_profit: number | null;
+  max_loss: number | null;
+  profit_unbounded: boolean;
+  loss_unbounded: boolean;
+  curve: OptionsPayoffPoint[];
 }
 
 /** Portfolio Studio: risk x-ray request body (closes are symbol → price lists). */
