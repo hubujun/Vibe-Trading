@@ -776,26 +776,23 @@ def _print_interactive_result(console: Any, result: Dict[str, Any], elapsed: flo
     """Print the assistant answer after the rail without boxed run panels."""
 
     from cli.ui.transcript import render_answer, render_elapsed_status
-    from cli._legacy import _read_metric_values
+    from cli.report_server import ensure_report_server, load_backtest_metrics
 
     content = (result.get("content") or "").strip()
     if content:
         console.print(render_answer(content))
         console.print()
     run_id = result.get("run_id")
-    run_dir = result.get("run_dir")
-    metrics = (
-        _read_metric_values(Path(run_dir) / "artifacts" / "metrics.csv") if run_dir else {}
-    )
+    metrics = load_backtest_metrics(result.get("run_dir"))
     if run_id and metrics:
-        console.print("[bold green]✓ Backtest complete[/bold green]")
+        console.print("[bold green]✓ 回测完成[/bold green]")
         metric_rows = (
-            ("Total return", "total_return", True),
-            ("Annual return", "annual_return", True),
+            ("总收益率", "total_return", True),
+            ("年化收益率", "annual_return", True),
             ("Sharpe", "sharpe", False),
-            ("Max drawdown", "max_drawdown", True),
-            ("Win rate", "win_rate", True),
-            ("Trades", "trade_count", False),
+            ("最大回撤", "max_drawdown", True),
+            ("胜率", "win_rate", True),
+            ("交易次数", "trade_count", False),
         )
         for label, key, as_percent in metric_rows:
             value = metrics.get(key)
@@ -804,15 +801,14 @@ def _print_interactive_result(console: Any, result: Dict[str, Any], elapsed: flo
             rendered = f"{value * 100:.1f}%" if as_percent else (
                 f"{int(value)}" if key == "trade_count" else f"{value:.2f}"
             )
-            console.print(f"  {label:<14} [bold]{rendered}[/bold]")
+            console.print(f"  {label:<10} [bold]{rendered}[/bold]")
         console.print()
         console.print(f"[bold]Run ID:[/bold] [cyan]{run_id}[/cyan]")
-        # Name the dashboard without starting a server: this is a print path, and
-        # a process spawned here would outlive the command that created it.
-        console.print(
-            f"[dim]Dashboard: run `vibe-trading serve`, then open "
-            f"/runs/{run_id}?view=dashboard[/dim]"
-        )
+        report_url = ensure_report_server(str(run_id))
+        if report_url:
+            console.print(f"[bold]报告:[/bold] [link={report_url}]{report_url}[/link]")
+        else:
+            console.print("[yellow]报告服务未能启动；回测产物已经安全保存。[/yellow]")
     elif run_id:
         console.print(f"[dim]/show {run_id} · {elapsed:.1f}s[/dim]")
     console.print(render_elapsed_status(elapsed))
