@@ -5,8 +5,8 @@ Parses a broker CSV/Excel export and produces:
     PnL, max drawdown, top symbols, market/hourly distribution
   - behavior (Phase 4b): disposition effect, overtrading, chasing momentum,
     anchoring — each with severity + numeric evidence
-
-Strategy extraction → backtest bridge still pending (Phase 4c).
+  - strategy (Phase 4c): quantifiable rules (holding / entry timing / sizing)
+    plus a backtest-ready spec via :func:`build_backtest_spec`
 """
 
 from __future__ import annotations
@@ -485,6 +485,253 @@ def _compute_behavior(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
+_HOLD_BUCKETS: tuple[tuple[float, float, str], ...] = (
+    (0.0, 1.0, "<1d"),
+    (1.0, 3.0, "1-3d"),
+    (3.0, 7.0, "3-7d"),
+    (7.0, 30.0, "7-30d"),
+    (30.0, float("inf"), "30d+"),
+)
+
+
+def _hold_bucket(hold_days: float) -> str:
+    """Map holding days to a labelled bucket."""
+    for lo, hi, label in _HOLD_BUCKETS:
+        if lo <= hold_days < hi:
+            return label
+    return "30d+"
+
+
+def _bucket_bounds(label: str) -> tuple[float, float]:
+    """Reverse-map a bucket label to its (lo, hi) day bounds."""
+    for lo, hi, name in _HOLD_BUCKETS:
+        if name == label:
+            return lo, hi
+    return 0.0, float("inf")
+
+
+def _confidence(n: int) -> str:
+    """Map a sample size to a confidence label."""
+    if n >= 10:
+        return "high"
+    if n >= 5:
+        return "medium"
+    if n >= 2:
+        return "low"
+    return "insufficient"
+
+
+def _detect_scale_in(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Detect scale-in patterns: repeated buys of one symbol within 7 days.
+
+    Returns up to 5 symbols whose buy sequences contain a same-symbol add-on
+    within 7 days of the previous buy.
+    """
+    buys = df[df["side"] == "buy"].sort_values(["symbol", "datetime"])
+    out: list[dict[str, Any]] = []
+    for sym, sub in buys.groupby("symbol"):
+        sub = sub.copy()
+        sub["ts"] = pd.to_datetime(sub["datetime"])
+        gap_days = sub["ts"].diff().dt.total_seconds() / 86400.0
+        add_ons = int((gap_days <= 7.0).sum())
+        if add_ons >= 1 and len(sub) >= 2:
+            out.append({
+                "symbol": sym,
+                "buy_count": int(len(sub)),
+                "scale_in_count": add_ons,
+            })
+    return out[:5]
+
+
+def _build_strategy_rules(features: dict[str, Any]) -> list[dict[str, Any]]:
+    """Convert extracted features into structured rules with confidence."""
+    rules: list[dict[str, Any]] = []
+
+    best_hold = features.get("optimal_holding_bucket")
+    if best_hold:
+        n = int(best_hold["roundtrips"])
+        rules.append({
+            "dimension": "holding",
+            "condition": f"hold positions {best_hold['bucket']}",
+            "evidence": (
+                f"best avg PnL {best_hold['avg_pnl']:+.2f} "
+                f"across {n} roundtrips"
+            ),
+            "confidence": _confidence(n),
+        })
+
+    timing = features.get("entry_timing", {})
+    for label in ("hour", "weekday"):
+        key = f"best_entry_{label}"
+        if key in timing:
+            n = int(timing[key]["roundtrips"])
+            rules.append({
+                "dimension": "entry_timing",
+                "condition": f"enter at {label} {timing[key]['value']}",
+                "evidence": (
+                    f"avg PnL {timing[key]['avg_pnl']:+.2f} "
+                    f"across {n} roundtrips"
+                ),
+                "confidence": _confidence(n),
+            })
+
+    sizing = features.get("position_sizing", {})
+    if "amount_cv" in sizing:
+        cv = float(sizing["amount_cv"])
+        n = int(features.get("buy_count", 0))
+        rules.append({
+            "dimension": "sizing",
+            "condition": (
+                "use uniform per-trade amount" if cv < 0.5
+                else "cap maximum trade size"
+            ),
+            "evidence": (
+                f"buy amount CV {cv:.2f} "
+                f"(avg {sizing['avg_buy_amount']}, max {sizing['max_buy_amount']})"
+            ),
+            "confidence": _confidence(n) if n else "insufficient",
+        })
+
+    seqs = sizing.get("scale_in_sequences", [])
+    if seqs:
+        total_buys = sum(int(s["buy_count"]) for s in seqs)
+        total_adds = sum(int(s["scale_in_count"]) for s in seqs)
+        rules.append({
+            "dimension": "scaling",
+            "condition": "average into positions (repeated buys within 7 days)",
+            "evidence": (
+                f"{total_adds} of {total_buys} buys were scale-ins "
+                f"across {len(seqs)} symbols"
+            ),
+            "confidence": _confidence(total_buys),
+        })
+    return rules
+
+
+def build_backtest_spec(features: dict[str, Any], df: pd.DataFrame) -> dict[str, Any]:
+    """Build a backtest-ready strategy skeleton from extracted features.
+
+    The spec is parameterized (symbols / period / holding / entry timing) so a
+    backtest runner can consume it directly without re-deriving rules from raw
+    records. It performs no data fetch itself.
+    """
+    if df.empty:
+        return {"status": "empty", "note": "no records to spec"}
+
+    spec: dict[str, Any] = {
+        "status": "ready",
+        "symbols": sorted(df["symbol"].astype(str).unique().tolist()),
+        "markets": sorted(df["market"].astype(str).unique().tolist()),
+        "period": {
+            "start": str(df["datetime"].min()),
+            "end": str(df["datetime"].max()),
+        },
+    }
+    best_hold = features.get("optimal_holding_bucket")
+    if best_hold:
+        lo, hi = _bucket_bounds(best_hold["bucket"])
+        spec["holding"] = {
+            "bucket": best_hold["bucket"],
+            "max_hold_days": hi if hi < float("inf") else None,
+        }
+    timing = features.get("entry_timing", {})
+    if "best_entry_hour" in timing:
+        spec["entry"] = {"preferred_hour": timing["best_entry_hour"]["value"]}
+    spec["rule_count"] = len(features.get("rules", []))
+    spec["note"] = (
+        "Parameterized skeleton; run through the backtest runner for "
+        "out-of-sample validation."
+    )
+    return spec
+
+
+def _compute_strategy(df: pd.DataFrame) -> dict[str, Any]:
+    """Extract quantifiable strategy rules from the trade journal.
+
+    Produces:
+      - holding_period: avg/median/min/max holding days
+      - optimal_holding_bucket: best hold-days bucket by avg PnL
+      - entry_timing: best entry hour / weekday by roundtrip PnL
+      - position_sizing: buy amount stats, scale-in sequences
+      - rules: structured rules with numeric evidence and confidence
+      - backtest_bridge: backtest-ready strategy spec
+    """
+    if df.empty:
+        return {"error": "empty trade journal"}
+
+    rts_df = pd.DataFrame(pair_trades_fifo(df))
+    features: dict[str, Any] = {"status": "ok", "roundtrips_analyzed": int(len(rts_df))}
+
+    if not rts_df.empty:
+        hold = rts_df["hold_days"]
+        features["holding_period"] = {
+            "avg_holding_days": round(float(hold.mean()), 2),
+            "median_holding_days": round(float(hold.median()), 2),
+            "min_holding_days": round(float(hold.min()), 2),
+            "max_holding_days": round(float(hold.max()), 2),
+        }
+        bucket_stats = (
+            rts_df.assign(bucket=rts_df["hold_days"].map(_hold_bucket))
+            .groupby("bucket")
+            .agg(
+                count=("pnl", "size"),
+                avg_pnl=("pnl", "mean"),
+                avg_pnl_pct=("pnl_pct", "mean"),
+            )
+        )
+        eligible = bucket_stats[bucket_stats["count"] >= 2]
+        if not eligible.empty:
+            best = eligible.sort_values("avg_pnl", ascending=False).iloc[0]
+            features["optimal_holding_bucket"] = {
+                "bucket": str(best.name),
+                "avg_pnl": round(float(best["avg_pnl"]), 2),
+                "avg_pnl_pct": round(float(best["avg_pnl_pct"]), 4),
+                "roundtrips": int(best["count"]),
+            }
+    else:
+        features["holding_period"] = {"note": "no closed roundtrips"}
+
+    if not rts_df.empty:
+        timed = rts_df.assign(buy_ts=pd.to_datetime(rts_df["buy_dt"]))
+        timing: dict[str, Any] = {}
+        for label, key in (("hour", timed["buy_ts"].dt.hour), ("weekday", timed["buy_ts"].dt.dayofweek)):
+            grouped = (
+                timed.groupby(key)["pnl"]
+                .agg(["count", "mean"])
+            )
+            grouped = grouped[grouped["count"] >= 2]
+            if not grouped.empty:
+                best_val = int(grouped["mean"].idxmax())
+                best = grouped.loc[best_val]
+                timing[f"best_entry_{label}"] = {
+                    "value": best_val,
+                    "avg_pnl": round(float(best["mean"]), 2),
+                    "roundtrips": int(best["count"]),
+                }
+        if timing:
+            features["entry_timing"] = timing
+
+    buys = df[df["side"] == "buy"]
+    if not buys.empty:
+        amt = buys["amount"]
+        mean_amt = float(amt.mean())
+        sizing: dict[str, Any] = {
+            "avg_buy_amount": round(mean_amt, 2),
+            "median_buy_amount": round(float(amt.median()), 2),
+            "max_buy_amount": round(float(amt.max()), 2),
+            "amount_cv": round(float(amt.std() / mean_amt) if mean_amt else 0.0, 4),
+        }
+        scale_ins = _detect_scale_in(df)
+        if scale_ins:
+            sizing["scale_in_sequences"] = scale_ins
+        features["position_sizing"] = sizing
+        features["buy_count"] = int(len(buys))
+
+    features["rules"] = _build_strategy_rules(features)
+    features["backtest_bridge"] = build_backtest_spec(features, df)
+    return features
+
+
 def _apply_filter(df: pd.DataFrame, expr: str) -> pd.DataFrame:
     """Filter DataFrame by a simple expression.
 
@@ -541,14 +788,15 @@ def analyze_trade_journal(file_path: str, analysis_type: str = "full", filter_ex
     Args:
         file_path: Path to CSV/Excel file.
         analysis_type: "full" | "profile" | "behavior" | "strategy".
-            "profile" and "behavior" are fully implemented; "strategy" still
-            returns a Phase 4c placeholder.
+            "strategy" extracts quantifiable rules (holding / entry timing /
+            sizing) plus a backtest-ready spec.
         filter_expr: Optional filter. Examples: "2026-01 to 2026-03",
             "symbol=600519.SH", "market=china_a".
 
     Returns:
         JSON string. Keys: status, file, format_detected, total_records,
-        date_range, market, profile / behavior (when applicable).
+        date_range, market, profile / behavior / strategy_features (when
+        applicable).
     """
     try:
         path = safe_user_path(file_path)
@@ -597,10 +845,15 @@ def analyze_trade_journal(file_path: str, analysis_type: str = "full", filter_ex
         result["behavior"] = _compute_behavior(filtered)
 
     if analysis_type in {"full", "strategy"}:
-        result["strategy_features"] = {
-            "status": "pending",
-            "note": "Strategy extraction → backtest bridging lands in Phase 4c.",
-        }
+        try:
+            result["strategy_features"] = _compute_strategy(filtered)
+        except Exception as exc:
+            logger.exception("strategy extraction failed: %s", exc)
+            result["strategy_features"] = {
+                "status": "error",
+                "error": str(exc),
+                "note": "Strategy extraction failed; profile/behavior unaffected.",
+            }
 
     return json.dumps(result, ensure_ascii=False, default=str)
 
@@ -629,7 +882,9 @@ class TradeJournalTool(BaseTool):
         "(1) trading profile — holding days, frequency, win rate, PnL ratio, "
         "top symbols, market/hourly distribution; "
         "(2) behavior diagnostics — disposition effect, overtrading, chasing "
-        "momentum, anchoring (each with severity + numeric evidence)."
+        "momentum, anchoring (each with severity + numeric evidence); "
+        "(3) strategy rules — holding period, entry timing, position sizing, "
+        "each with numeric evidence + confidence, plus a backtest-ready spec."
     )
     parameters = {
         "type": "object",
@@ -641,7 +896,7 @@ class TradeJournalTool(BaseTool):
             "analysis_type": {
                 "type": "string",
                 "enum": ["full", "profile", "behavior", "strategy"],
-                "description": "Which analysis to run. 'full' = profile (behavior/strategy are Phase 4b placeholders).",
+                "description": "Which analysis to run. 'full' = profile + behavior + strategy; strategy extracts quantifiable rules with a backtest-ready spec.",
                 "default": "full",
             },
             "filter_expr": {

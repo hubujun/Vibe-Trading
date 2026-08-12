@@ -33,8 +33,10 @@ from src.tools.trade_journal_tool import (
     _apply_filter,
     _compute_behavior,
     _compute_profile,
+    _compute_strategy,
     _disposition_effect,
     analyze_trade_journal,
+    build_backtest_spec,
     pair_trades_fifo,
 )
 
@@ -499,15 +501,113 @@ def test_analyze_full_includes_profile_and_behavior(allow_tmp: Path) -> None:
     assert result["profile"]["total_pnl"] == 200.0
 
 
-def test_analyze_strategy_is_pending_placeholder(allow_tmp: Path) -> None:
+def test_analyze_strategy_returns_features(allow_tmp: Path) -> None:
     result = json.loads(
         analyze_trade_journal(str(_write_full_journal(allow_tmp)), analysis_type="strategy")
     )
     assert result["status"] == "ok"
-    assert result["strategy_features"]["status"] == "pending"
+    sf = result["strategy_features"]
+    assert sf["status"] == "ok"
+    assert sf["roundtrips_analyzed"] == 1
+    assert "rules" in sf
+    assert "backtest_bridge" in sf
+    assert sf["backtest_bridge"]["status"] == "ready"
+    assert "600519.SH" in sf["backtest_bridge"]["symbols"]
     # profile/behavior should not be attached for a strategy-only request.
     assert "profile" not in result
     assert "behavior" not in result
+
+
+def _strategy_fixture_df() -> pd.DataFrame:
+    """Four roundtrips: two quick wins (1d/2d) and two long losses (40d/50d)."""
+    import datetime as dt
+
+    base = dt.datetime(2026, 1, 1, 10, 0)
+    records = []
+    for i, (hold_days, price_delta) in enumerate(
+        [(1, 2.0), (2, 3.0), (40, -1.0), (50, -2.0)]
+    ):
+        sym = f"S{i}.SH"
+        buy = base + dt.timedelta(days=i * 100)
+        sell = buy + dt.timedelta(days=hold_days)
+        records.append(_rec(buy.strftime("%Y-%m-%d %H:%M:%S"), sym, "buy", 100, 10))
+        records.append(_rec(sell.strftime("%Y-%m-%d %H:%M:%S"), sym, "sell", 100, 10 + price_delta))
+    return _df(records)
+
+
+def test_compute_strategy_holding_bucket_and_rules() -> None:
+    out = _compute_strategy(_strategy_fixture_df())
+    assert out["status"] == "ok"
+    assert out["roundtrips_analyzed"] == 4
+    # avg hold = (1+2+40+50)/4 = 23.25
+    assert out["holding_period"]["avg_holding_days"] == 23.25
+    # bucket 1-3d has 2 roundtrips (avg pnl +25), 30d+ has 2 (avg -6.5)
+    assert out["optimal_holding_bucket"]["bucket"] == "1-3d"
+    assert out["optimal_holding_bucket"]["roundtrips"] == 2
+    holding_rules = [r for r in out["rules"] if r["dimension"] == "holding"]
+    assert holding_rules
+    assert "1-3d" in holding_rules[0]["condition"]
+    assert holding_rules[0]["confidence"] == "low"  # n=2
+
+
+def test_compute_strategy_entry_timing() -> None:
+    out = _compute_strategy(_strategy_fixture_df())
+    # all buys at hour 10 → best_entry_hour = 10
+    assert out["entry_timing"]["best_entry_hour"]["value"] == 10
+    assert out["entry_timing"]["best_entry_hour"]["roundtrips"] == 4
+
+
+def test_compute_strategy_empty() -> None:
+    assert _compute_strategy(records_to_dataframe([])) == {"error": "empty trade journal"}
+
+
+def test_compute_strategy_scale_in_detection() -> None:
+    records = [
+        _rec("2026-01-01 10:00:00", "A.SH", "buy", 100, 10),
+        _rec("2026-01-03 10:00:00", "A.SH", "buy", 100, 11),  # +2d scale-in
+        _rec("2026-02-01 10:00:00", "A.SH", "sell", 200, 12),
+        _rec("2026-03-01 10:00:00", "B.SH", "buy", 100, 5),
+        _rec("2026-04-01 10:00:00", "B.SH", "buy", 100, 6),  # +31d: not a scale-in
+    ]
+    out = _compute_strategy(_df(records))
+    seqs = out["position_sizing"]["scale_in_sequences"]
+    assert len(seqs) == 1
+    assert seqs[0]["symbol"] == "A.SH"
+    assert seqs[0]["scale_in_count"] == 1
+    scaling_rules = [r for r in out["rules"] if r["dimension"] == "scaling"]
+    assert scaling_rules and "7 days" in scaling_rules[0]["condition"]
+
+
+def test_backtest_bridge_spec() -> None:
+    out = _compute_strategy(_strategy_fixture_df())
+    spec = out["backtest_bridge"]
+    assert spec["status"] == "ready"
+    assert spec["symbols"] == ["S0.SH", "S1.SH", "S2.SH", "S3.SH"]
+    assert spec["markets"] == ["china_a"]
+    assert spec["period"]["start"] <= spec["period"]["end"]
+    assert spec["holding"]["bucket"] == "1-3d"
+    assert spec["holding"]["max_hold_days"] == 3.0
+    assert spec["entry"]["preferred_hour"] == 10
+    assert spec["rule_count"] >= 1
+
+
+def test_backtest_bridge_empty() -> None:
+    assert build_backtest_spec({}, records_to_dataframe([]))["status"] == "empty"
+
+
+def test_analyze_strategy_failure_degrades_gracefully(
+    allow_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(_df: pd.DataFrame) -> dict:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("src.tools.trade_journal_tool._compute_strategy", boom)
+    result = json.loads(analyze_trade_journal(str(_write_full_journal(allow_tmp))))
+    assert result["strategy_features"]["status"] == "error"
+    assert "boom" in result["strategy_features"]["error"]
+    # profile/behavior unaffected by strategy failure
+    assert result["profile"]["total_pnl"] == 200.0
+    assert "behavior" in result
 
 
 def test_analyze_profile_only(allow_tmp: Path) -> None:

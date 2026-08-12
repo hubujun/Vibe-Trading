@@ -8,10 +8,15 @@ Mounted by ``agent/api_server.py`` via ``register_options_lab_routes(app)``.
 - ``GET /api/options-lab/chain?ticker=SPY&expiration=...`` — one expiration's
   full calls/puts ladder enriched with Black-Scholes Greeks priced at each
   contract's own implied volatility.
+- ``GET /api/options-lab/payoff?strategy=...&lower_strike=...`` — analytic
+  expiry payoff curve and risk summary for parameterized multi-leg strategies
+  (bull call spread / long straddle / iron condor). Pure local math — no data
+  fetch.
 
-Both are read-only views over the shared Yahoo client (throttled per host).
-The heavy lifting lives in :mod:`backtest.options_analytics` so it can be
-tested without a server; these endpoints only adapt it to HTTP.
+Both market-data views are read-only over the shared Yahoo client (throttled
+per host). The heavy lifting lives in :mod:`backtest.options_analytics` and
+:mod:`backtest.options_payoff` so it can be tested without a server; these
+endpoints only adapt it to HTTP.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from pydantic import BaseModel, Field
 __all__ = [
     "OptionsSurfaceResponse",
     "OptionsChainResponse",
+    "OptionsPayoffResponse",
     "register_options_lab_routes",
 ]
 
@@ -92,6 +98,38 @@ class OptionsChainResponse(BaseModel):
     contracts: list[OptionsChainContract] = Field(default_factory=list)
 
 
+class PayoffPoint(BaseModel):
+    """One point of the expiry payoff curve."""
+
+    spot: float = Field(..., description="Underlying spot at expiry")
+    pnl: float = Field(..., description="Strategy P&L at this spot (per multiplier unit)")
+
+
+class OptionsPayoffResponse(BaseModel):
+    """Analytic expiry payoff curve plus strategy risk summary.
+
+    ``max_profit`` / ``max_loss`` are ``null`` when the corresponding tail is
+    unbounded (JSON cannot carry infinities); the companion ``*_unbounded``
+    booleans disambiguate.
+    """
+
+    strategy: str = Field(..., description="Strategy name as requested")
+    entry_spot: float = Field(..., description="Underlying spot at entry")
+    time_to_expiry: float = Field(..., description="Years until expiry at entry")
+    rate: float = Field(..., description="Annual continuously compounded risk-free rate")
+    iv: float = Field(..., description="Annualized volatility used for entry pricing")
+    multiplier: float = Field(..., description="Currency multiplier per option price unit")
+    net_premium: float = Field(..., description="Signed gross entry premium (debit positive)")
+    entry_commission: float = Field(..., description="Entry commission paid")
+    entry_cost: float = Field(..., description="Gross premium plus entry commission")
+    breakevens: list[float] = Field(default_factory=list, description="Isolated zero-P&L expiry spots")
+    max_profit: Optional[float] = Field(None, description="Analytic max profit; null when unbounded")
+    max_loss: Optional[float] = Field(None, description="Analytic max loss; null when unbounded")
+    profit_unbounded: bool = Field(..., description="Right-tail profit is unbounded")
+    loss_unbounded: bool = Field(..., description="Right-tail loss is unbounded")
+    curve: list[PayoffPoint] = Field(default_factory=list, description="Expiry payoff curve points")
+
+
 # ============================================================================
 # Route registration
 # ============================================================================
@@ -152,3 +190,102 @@ def register_options_lab_routes(
         except Exception as exc:  # noqa: BLE001 - upstream failures surface as 502
             raise HTTPException(status_code=502, detail=f"options chain fetch failed: {exc}") from exc
         return OptionsChainResponse(**chain)
+
+    @app.get(
+        "/api/options-lab/payoff",
+        response_model=OptionsPayoffResponse,
+        dependencies=[Depends(require_auth)],
+    )
+    async def options_payoff_endpoint(
+        strategy: str = Query(
+            ...,
+            description="Strategy template: bull_call_spread | long_straddle | iron_condor",
+        ),
+        lower_strike: Optional[float] = Query(None, gt=0, description="bull_call_spread lower strike"),
+        upper_strike: Optional[float] = Query(None, gt=0, description="bull_call_spread upper strike"),
+        strike: Optional[float] = Query(None, gt=0, description="long_straddle strike"),
+        put_wing: Optional[float] = Query(None, gt=0, description="iron_condor put wing"),
+        put_body: Optional[float] = Query(None, gt=0, description="iron_condor put body"),
+        call_body: Optional[float] = Query(None, gt=0, description="iron_condor call body"),
+        call_wing: Optional[float] = Query(None, gt=0, description="iron_condor call wing"),
+        qty: int = Query(1, ge=1, le=100, description="Contract quantity per leg"),
+        entry_spot: Optional[float] = Query(None, gt=0, description="Entry spot; defaults to mean strike"),
+        time_to_expiry: float = Query(0.25, gt=0, description="Years until expiry at entry"),
+        rate: float = Query(0.05, description="Risk-free rate"),
+        iv: float = Query(0.3, gt=0, description="Entry IV for legs without explicit premium"),
+        multiplier: float = Query(1.0, gt=0, description="Currency per option price unit"),
+        commission_rate: float = Query(0.001, ge=0, description="Entry commission as premium fraction"),
+        points: int = Query(201, ge=2, le=2001, description="Payoff curve grid points"),
+    ) -> OptionsPayoffResponse:
+        """Return an analytic expiry payoff curve for a parameterized strategy.
+
+        Pure local math (no market data fetch): entry premiums are priced with
+        Black-Scholes at the supplied entry spot / IV, then the expiry payoff is
+        solved from the piecewise-linear structure.
+        """
+        from backtest.options_payoff import (
+            bull_call_spread,
+            default_spot_grid,
+            expiry_payoff,
+            iron_condor,
+            long_straddle,
+        )
+
+        try:
+            if strategy == "bull_call_spread":
+                if lower_strike is None or upper_strike is None:
+                    raise ValueError("bull_call_spread requires lower_strike and upper_strike")
+                legs = bull_call_spread(lower_strike, upper_strike, qty)
+            elif strategy == "long_straddle":
+                if strike is None:
+                    raise ValueError("long_straddle requires strike")
+                legs = long_straddle(strike, qty)
+            elif strategy == "iron_condor":
+                if any(v is None for v in (put_wing, put_body, call_body, call_wing)):
+                    raise ValueError("iron_condor requires put_wing, put_body, call_body, call_wing")
+                legs = iron_condor(put_wing, put_body, call_body, call_wing, qty)
+            else:
+                raise ValueError(
+                    f"unknown strategy {strategy!r}; "
+                    "expected bull_call_spread | long_straddle | iron_condor"
+                )
+
+            entry = entry_spot if entry_spot is not None else float(
+                sum(leg.strike for leg in legs) / len(legs)
+            )
+            grid = default_spot_grid(entry, half_width_pct=0.5, points=points)
+            report = expiry_payoff(
+                legs,
+                grid,
+                entry_spot=entry,
+                time_to_expiry=time_to_expiry,
+                rate=rate,
+                iv=iv,
+                multiplier=multiplier,
+                commission_rate=commission_rate,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001 - unexpected math failures surface as 502
+            raise HTTPException(status_code=502, detail=f"options payoff failed: {exc}") from exc
+
+        return OptionsPayoffResponse(
+            strategy=strategy,
+            entry_spot=entry,
+            time_to_expiry=time_to_expiry,
+            rate=rate,
+            iv=iv,
+            multiplier=multiplier,
+            net_premium=round(float(report.net_premium), 4),
+            entry_commission=round(float(report.entry_commission), 4),
+            entry_cost=round(float(report.entry_cost), 4),
+            breakevens=[round(float(b), 4) for b in report.breakevens],
+            max_profit=None if report.profit_unbounded else round(float(report.max_profit), 4),
+            max_loss=None if report.loss_unbounded else round(float(report.max_loss), 4),
+            profit_unbounded=report.profit_unbounded,
+            loss_unbounded=report.loss_unbounded,
+            curve=[
+                PayoffPoint(spot=float(s), pnl=float(p))
+                for s, p in zip(report.spot_grid, report.payoff, strict=False)
+            ],
+        )
