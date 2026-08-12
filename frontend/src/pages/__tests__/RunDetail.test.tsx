@@ -110,6 +110,35 @@ describe("RunDetail page", () => {
     expect(screen.getByRole("tab", { name: /dashboard/i })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("presents a readable strategy title instead of promoting the run id", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success",
+      run_id: "20260811_110751_32_d951c8",
+      prompt: "回测 000001.SZ 在 2024 年的 20/50 日均线交叉策略。",
+      chart_symbols: ["000001.SZ"],
+      run_card: {
+        backtest: { codes: ["000001.SZ"], start_date: "2024-01-01", end_date: "2024-12-31", engine: "daily" },
+        data_sources: ["tencent"],
+      },
+    });
+    apiMock.getRunCode.mockResolvedValueOnce({});
+
+    renderRunDetail("/runs/20260811_110751_32_d951c8?view=dashboard");
+
+    expect(await screen.findByRole("heading", { name: "000001.SZ · 20/50 日均线交叉策略" })).toBeInTheDocument();
+    expect(screen.getByText("RUN 20260811_110751_32_d951c8")).toHaveClass("text-[10px]");
+  });
+
+  it("opens the research dashboard when requested by the terminal report URL", async () => {
+    apiMock.getRun.mockResolvedValue({ status: "success", run_id: "terminal-run", prompt: "MA strategy" });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    renderRunDetail("/runs/terminal-run?view=dashboard");
+
+    expect(await screen.findByTestId("strategy-dashboard")).toHaveTextContent("terminal-run");
+    expect(screen.getByRole("tab", { name: /dashboard/i })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("does not let an older route load replace the current run or code", async () => {
     const oldRun = deferred<RunData>();
     const oldCode = deferred<Record<string, string>>();
