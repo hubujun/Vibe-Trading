@@ -59,7 +59,7 @@ Decide which workflow to use based on the request:
 4. Syntax check → `backtest(run_dir=...)` → `read_file("artifacts/metrics.csv")`
 5. Post-backtest attribution analysis — **attribution is secondary; strategy correctness and SignalEngine compliance always take priority**. Run each layer whose condition is met. If a layer is skipped, append one line: `ℹ️ Layer N (name): skipped — [reason]`. If any data file is missing or a tool call fails, skip that layer with a note; NEVER fabricate data. Present all results as markdown pipe tables.
 
-For full workflow details, consult `agent/prompts/task_routing.md` and `agent/prompts/identity_resolution.md`.
+For full workflow details, consult `prompts/task_routing.md` and `prompts/identity_resolution.md`.
 
 ## Attribution Layers
 
