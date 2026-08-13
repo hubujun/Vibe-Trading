@@ -17,9 +17,6 @@ RUN npm run build
 FROM python:3.11-slim@sha256:e031123e3d85762b141ad1cbc56452ba69c6e722ebf2f042cc0dc86c47c0d8b3 AS builder
 # python:3.11-slim digest resolved 2026-07-13
 
-# Build-time extras. Default installs feishu + telegram channel SDKs.
-ARG VIBE_EXTRAS=feishu,telegram
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -54,12 +51,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements-channels-lock.tx
 # above; without it pip re-resolves and downloads unhashed wheels.
 COPY pyproject.toml LICENSE README.md ./
 COPY agent/ agent/
-RUN if [ -n "$VIBE_EXTRAS" ]; then \
-        echo "Installing extras: ${VIBE_EXTRAS}" && \
-        pip install --no-cache-dir -e ".[${VIBE_EXTRAS}]"; \
-    else \
-        pip install --no-cache-dir -e .; \
-    fi
+RUN pip install --no-cache-dir --no-deps -e .
 
 # ============================================================================
 # Stage 3: Runtime — carries the prebuilt venv only, no compilers/dev headers.
