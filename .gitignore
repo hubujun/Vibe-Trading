@@ -68,7 +68,6 @@ data/backup/
 docs/
 !wiki/docs/
 !wiki/docs/**
-!agent/prompts/
 docs/screenshots/agent-run.png
 docs/screenshots/boot.png
 data/minutes/
