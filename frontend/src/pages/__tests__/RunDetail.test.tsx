@@ -125,8 +125,38 @@ describe("RunDetail page", () => {
 
     renderRunDetail("/runs/20260811_110751_32_d951c8?view=dashboard");
 
-    expect(await screen.findByRole("heading", { name: "000001.SZ · 20/50 日均线交叉策略" })).toBeInTheDocument();
+    // The strategy name is report chrome derived from the prompt, so it follows
+    // the UI language, not the prompt's. A Chinese prompt under an English UI
+    // must not leak a Chinese title into an otherwise English report.
+    expect(
+      await screen.findByRole("heading", { name: "000001.SZ · 20/50-day moving-average crossover" })
+    ).toBeInTheDocument();
     expect(screen.getByText("RUN 20260811_110751_32_d951c8")).toHaveClass("text-[10px]");
+  });
+
+  it("renders the derived strategy name in the active UI language", async () => {
+    const i18n = (await import("@/i18n")).default;
+    apiMock.getRun.mockResolvedValue({
+      status: "success",
+      run_id: "zh-run",
+      prompt: "回测 000001.SZ 在 2024 年的 20/50 日均线交叉策略。",
+      chart_symbols: ["000001.SZ"],
+    });
+    apiMock.getRunCode.mockResolvedValueOnce({});
+    const previous = i18n.language;
+    await act(async () => {
+      await i18n.changeLanguage("zh-CN");
+    });
+    try {
+      renderRunDetail("/runs/zh-run?view=dashboard");
+      expect(
+        await screen.findByRole("heading", { name: "000001.SZ · 20/50 日均线交叉策略" })
+      ).toBeInTheDocument();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage(previous);
+      });
+    }
   });
 
   it("opens the research dashboard when requested by the terminal report URL", async () => {
