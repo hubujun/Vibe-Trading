@@ -71,6 +71,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Verify hash-locked dependencies
+        # Both locks, separately: each must be internally complete on its own,
+        # because the Docker build installs them as two independent
+        # --require-hashes passes. Verifying only the main lock would let the
+        # channel lock rot until a release build failed.
+        run: |
+          pip install --dry-run --ignore-installed --require-hashes -r requirements-lock.txt
+          pip install --dry-run --ignore-installed --require-hashes -r requirements-channels-lock.txt
+
       - name: Install dependencies
         # `openbb` is included so agent/tests/test_openbb_bridge actually runs:
         # those tests importorskip on openbb_ai, so without the extra the whole
