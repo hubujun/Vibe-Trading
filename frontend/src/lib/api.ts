@@ -1,7 +1,6 @@
 import i18n from "@/i18n";
 import { authHeaders, withAuthTicket } from "@/lib/apiAuth";
 import type {
-  OptionsChainResponse,
   OptionsPayoffRequest,
   OptionsPayoffResponse,
 } from "@/lib/options";
@@ -268,12 +267,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  getOptionsChain: (ticker: string, expiration?: number) => {
-    const q = new URLSearchParams();
-    q.set("ticker", ticker);
-    if (expiration !== undefined) q.set("expiration", String(expiration));
-    return request<OptionsChainResponse>(`/options/chain?${q.toString()}`);
-  },
 
   // Connector runtime channel — privileged surface actions (NOT agent tools).
   // commit is the ONLY action that writes a mandate; halt trips the kill switch.
