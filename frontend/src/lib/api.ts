@@ -565,6 +565,8 @@ export const api = {
     request<AutopilotPerformance>("/api/autopilot/performance", { signal }),
   getAutopilotPositions: (signal?: AbortSignal) =>
     request<AutopilotPositionsResponse>("/api/autopilot/positions", { signal }),
+  getComboSummary: (signal?: AbortSignal) =>
+    request<ComboSummary>("/api/combo/summary", { signal }),
   getOptionsSurface: (ticker: string, signal?: AbortSignal) =>
     request<OptionsSurface>(
       `/api/options-lab/surface?ticker=${encodeURIComponent(ticker)}`,
@@ -1800,6 +1802,52 @@ export interface AutopilotDataHealth {
   symbols: Record<string, AutopilotDataHealthSymbol>;
 }
 
+export interface ComboSignalItem {
+  symbol: string;
+  score: number;
+}
+
+export interface ComboSignal {
+  date?: string;
+  longs: ComboSignalItem[];
+  shorts: ComboSignalItem[];
+}
+
+export interface ComboPaper {
+  nav?: number | null;
+  started_at?: string | null;
+  last_signal_date?: string | null;
+  trades: Array<{ from: string; to: string; ret: number }>;
+}
+
+export interface ComboMetrics {
+  updated_at?: string | null;
+  period?: string | null;
+  symbols?: number | null;
+  days?: number | null;
+  cost_per_side?: number | null;
+  ic: Record<string, { ic_mean: number; ir: number; ic_pos: number }>;
+  backtest: Record<
+    string,
+    { annual: number; sharpe: number; max_dd: number; cum: number; turnover: number }
+  >;
+}
+
+export interface ComboHypothesis {
+  hypothesis_id: string;
+  title: string;
+  status: string;
+  thesis: string;
+}
+
+export interface ComboSummary {
+  signal: ComboSignal;
+  paper: ComboPaper;
+  metrics: ComboMetrics;
+  hypotheses: ComboHypothesis[];
+  updated_at?: string | null;
+}
+
 export interface AutopilotStatus {
   pipeline: AutopilotPipeline;
   health: AutopilotHealth;
@@ -1848,11 +1896,28 @@ export interface AutopilotRetiredFactor {
   reason: string | null;
 }
 
+export interface AutopilotZooFactor {
+  alpha_id: string;
+  meta: {
+    id?: string;
+    nickname?: string | null;
+    theme?: string[];
+    formula_latex?: string;
+    columns_required?: string[];
+    universe?: string[];
+    frequency?: string[];
+    decay_horizon?: number;
+    min_warmup_bars?: number;
+    notes?: string;
+  } | null;
+  meta_ok: boolean;
+}
+
 export interface AutopilotFactorList {
   active: AutopilotFactorInfo[];
   pending: string[];
   retired: AutopilotRetiredFactor[];
-  zoo: string[];
+  zoo: AutopilotZooFactor[];
   updated_at: string | null;
 }
 
