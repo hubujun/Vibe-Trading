@@ -388,7 +388,7 @@ export function Autopilot() {
                     ) : (
                       <ul className="space-y-1.5">
                         {factors.pending.map((id) => (
-                          <li key={id} className="font-mono text-sm">
+                          <li key={id} className="break-all font-mono text-sm">
                             {id}
                           </li>
                         ))}
@@ -404,7 +404,7 @@ export function Autopilot() {
                     ) : (
                       <ul className="space-y-1.5">
                         {factors.zoo.map((id) => (
-                          <li key={id} className="font-mono text-sm">
+                          <li key={id} className="break-all font-mono text-sm">
                             {id}
                           </li>
                         ))}
@@ -422,12 +422,12 @@ export function Autopilot() {
                         {factors.retired.map((f) => (
                           <li
                             key={f.alpha_id}
-                            className="text-sm text-muted-foreground"
+                            className="break-all text-sm text-muted-foreground"
                             title={f.reason ?? undefined}
                           >
                             <span className="font-mono">{f.alpha_id}</span>
                             {f.retired_at ? (
-                              <span className="ml-1.5 text-xs">
+                              <span className="ml-1.5 text-xs whitespace-nowrap">
                                 {formatTradeTime(f.retired_at, t)}
                               </span>
                             ) : null}
