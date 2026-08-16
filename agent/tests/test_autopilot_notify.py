@@ -41,7 +41,7 @@ class _FakeBus:
     def __init__(self) -> None:
         self.messages = []
 
-    def publish_outbound(self, message) -> None:
+    async def publish_outbound(self, message) -> None:
         self.messages.append(message)
 
 
@@ -214,7 +214,7 @@ class TestProcessPending:
         _write_outbox(worker)
 
         class _BoomBus:
-            def publish_outbound(self, message) -> None:
+            async def publish_outbound(self, message) -> None:
                 if message.chat_id == "bad":
                     raise RuntimeError("channel down")
 
