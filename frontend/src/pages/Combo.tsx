@@ -53,7 +53,10 @@ export function Combo() {
       nav = nav / (1 + rets[i].ret / 100);
     }
     reversed.unshift({ d: rets[0].from, v: nav });
-    return reversed;
+    // 按日期聚合去重（相同日期保留最新一个点），避免脏数据造成横坐标重复
+    const byDate = new Map<string, { d: string; v: number }>();
+    for (const p of reversed) byDate.set(p.d, p);
+    return Array.from(byDate.values());
   }, [data]);
 
   useEffect(() => {

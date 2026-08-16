@@ -77,10 +77,14 @@ def build_signal() -> dict:
             pass
     if state.get('last_signal_date') and state['last_longs']:
         try:
-            prev_date = pd.Timestamp(state['last_signal_date'])
-            if prev_date < last_date:
+            prev_day = pd.Timestamp(state['last_signal_date']).date()
+            last_day = last_date.date()
+            # 关键: 用 .date() 比较, OKX 日K ts 转本地后是当日16:00, 与 prev 的00:00
+            # 比较同一天也恒 True, 导致每次运行都重复追加"当天对当天"记录
+            if prev_day < last_day:
                 rets = close_df.pct_change()
-                seg = rets.loc[prev_date:last_date]
+                # 取 (prev, last] 开区间: 从 prev 次日到 last 当天
+                seg = rets.loc[pd.Timestamp(prev_day) + pd.Timedelta(days=1): last_day]
                 if len(seg) >= 1:
                     r_long = seg[state['last_longs']].mean(axis=1).sum()
                     r_short = -seg[state['last_shorts']].mean(axis=1).sum()
@@ -88,7 +92,7 @@ def build_signal() -> dict:
                     net = (r_long + r_short) / 2 - COST
                     state['nav'] *= (1 + net)
                     state['trades'].append({
-                        'from': str(prev_date.date()), 'to': str(last_date.date()),
+                        'from': str(prev_day), 'to': str(last_day),
                         'ret': round(net * 100, 2),
                     })
         except Exception as e:
