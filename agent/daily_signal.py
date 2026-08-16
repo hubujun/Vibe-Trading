@@ -15,7 +15,7 @@ from src.factors.zoo.academic import bab, high52w
 SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
            'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT']
 COST = 0.001
-STATE_PATH = '/Users/laohu/Vibe-Trading/agent/runs/paper_combo/state.json'
+STATE_PATH = '/Users/laohu/.vibe-trading/runs/paper_combo/state.json'
 DAYS = 800
 
 
@@ -97,6 +97,7 @@ def build_signal() -> dict:
     state['last_signal_date'] = str(last_date.date())
     state['last_longs'] = longs
     state['last_shorts'] = shorts
+    state['scores'] = {c: round(float(last_scores[c]), 3) for c in longs + shorts}
     if state['started_at'] is None:
         state['started_at'] = str(last_date.date())
     json.dump(state, open(STATE_PATH, 'w'), ensure_ascii=False, indent=2)

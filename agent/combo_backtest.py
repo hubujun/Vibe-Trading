@@ -99,6 +99,7 @@ def main():
 
     # 组合回测: 每日 rank, 多 top3 空 bottom3, 等权, 次日开盘调仓 (用收盘近似), 计成本
     print('\n=== 组合回测 (多top3空bottom3, 日频调仓, 单边成本0.1%) ===')
+    bt_results = {}
     for name, f in [('COMBO3(等权)', combo), ('COMBO2(BAB+52w)', combo2)] + list(factors.items()):
         # 逐日 rank
         r = f.rank(axis=1, pct=True)
@@ -116,8 +117,30 @@ def main():
         annual = (1 + total) ** (1 / years) - 1
         sharpe = net.mean() / net.std() * math.sqrt(365) if net.std() > 0 else 0
         dd = (nav / nav.cummax() - 1).min()
+        bt_results[name] = {
+            'annual': round(annual * 100, 2), 'sharpe': round(sharpe, 2),
+            'max_dd': round(dd * 100, 2), 'cum': round(total * 100, 2),
+            'turnover': round(float(turnover.mean()), 3),
+        }
         print(f'  {name:<12} 年化={annual*100:+.1f}%  夏普={sharpe:.2f}  '
               f'最大回撤={dd*100:.1f}%  累计={total*100:+.1f}%  日均换手={turnover.mean():.2f}')
+
+    # 固化指标供 web API 读取
+    import json, os
+    out = {
+        'updated_at': str(pd.Timestamp.now().date()),
+        'period': f'{close_df.index[0].date()} ~ {close_df.index[-1].date()}',
+        'symbols': close_df.shape[1], 'days': close_df.shape[0],
+        'cost_per_side': COST,
+        'ic': {k: {'ic_mean': round(v.mean(), 4), 'ir': round(v.mean() / v.std(), 3),
+                   'ic_pos': round(100 * (v > 0).mean(), 1)}
+               for k, v in ic_table.items()},
+        'backtest': bt_results,
+    }
+    os.makedirs(os.path.dirname('/Users/laohu/.vibe-trading/runs/paper_combo/'), exist_ok=True)
+    json.dump(out, open('/Users/laohu/.vibe-trading/runs/paper_combo/backtest_metrics.json', 'w'),
+              ensure_ascii=False, indent=2)
+    print('\n指标已写入 runs/paper_combo/backtest_metrics.json')
 
     # 输出净值序列供后续使用
     combo_nav = (1 + ((combo.rank(axis=1, pct=True) >= 0.7).astype(float) -

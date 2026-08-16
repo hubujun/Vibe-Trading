@@ -93,7 +93,6 @@
     "dataFresh": "全部交易对新鲜",
     "dataStale": "过期交易对",
     "dataUpdatedAt": "快照"
-
   },
   "optionsLab": {
     "analyze": "分析",
@@ -244,6 +243,7 @@
     "scheduled": "定时任务",
     "reports": "报告",
     "alphaZoo": "Alpha 因子库",
+    "combo": "策略组合",
     "settings": "设置",
     "correlation": "相关性矩阵",
     "optionsLab": "期权实验室",
@@ -264,7 +264,6 @@
     "mainNavigation": "主导航",
     "about": "关于",
     "autopilot": "自动交易",
-    "optionsLab": "期权实验室",
     "portfolioStudio": "组合实验室"
   },
   "runtime": {
@@ -1200,7 +1199,7 @@
       "gtja191": "国泰君安 191",
       "academic": "学术文献异象因子",
       "fundamental": "基本面因子（PIT 安全）",
-      "crypto": "加密链上与衍生品因子"
+      "crypto": "链上与衍生品加密因子"
     },
     "zooCardDesc": {
       "qlib158": "微软 Qlib 完整的 158 特征库，涵盖动量、波动率、成交量及滚动统计信号。",
@@ -1208,7 +1207,7 @@
       "gtja191": "国泰君安证券的 191 个 Alpha；专门针对中国 A 股市场优化的技术面与微观结构信号。",
       "academic": "来自学术文献的长期异象因子精选（价值、动量、质量、低波动率等）。",
       "fundamental": "基于 PIT 安全的 SEC company facts 计算的质量与价值因子——盈利收益率、ROE、毛利率、资产增长（按 filed-date 锚定）。",
-      "crypto": "加密原生因子——资金费率 carry、持仓量情绪、链上指标（NVT、MVRV、活跃地址、交易所净流入），以及市场微观结构（振幅、量比）。"
+      "crypto": "加密货币原生因子 — 资金费率套利、未平仓合约情绪、链上指标(NVT、MVRV、活跃地址、交易所净流入)以及市场微观结构(振幅、成交量比)。"
     },
     "universeOption": {
       "csi300": "沪深 300（A 股）",

@@ -268,6 +268,10 @@ register_options_routes(app)
 from src.api.autopilot_routes import register_autopilot_routes  # noqa: E402
 register_autopilot_routes(app)
 
+# --- Combo (BAB+high52w) dashboard ---
+from src.api.combo_routes import register_combo_routes  # noqa: E402
+register_combo_routes(app)
+
 # --- Options Lab (vol surface + Greeks) + Portfolio Studio (risk x-ray/constraints) ---
 from src.api.options_lab_routes import register_options_lab_routes  # noqa: E402
 from src.api.portfolio_routes import register_portfolio_routes  # noqa: E402
