@@ -142,7 +142,7 @@ class AutopilotNotifyWorker:
             for channel, chat_ids in targets.items():
                 for chat_id in chat_ids:
                     try:
-                        self._publish(channel, chat_id, payload)
+                        await self._publish(channel, chat_id, payload)
                     except Exception as exc:  # noqa: BLE001 — per-target isolation
                         logger.warning(
                             "autopilot notify %s -> %s:%s failed: %s",
@@ -150,7 +150,7 @@ class AutopilotNotifyWorker:
                         )
             self._mark_sent(path)
 
-    def _publish(
+    async def _publish(
         self,
         channel: str,
         chat_id: str,
@@ -162,7 +162,7 @@ class AutopilotNotifyWorker:
         runtime = _get_channel_runtime()
         if runtime is None or not runtime.bus:
             raise RuntimeError("channel runtime not available")
-        runtime.bus.publish_outbound(
+        await runtime.bus.publish_outbound(
             OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
