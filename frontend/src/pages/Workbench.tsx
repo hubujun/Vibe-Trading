@@ -21,7 +21,9 @@ import {
 import { toast } from "sonner";
 import {
   api,
+  type ComboHypothesis,
   type WorkbenchResponse,
+  type WorkbenchReview,
   type WorkbenchStrategy,
 } from "@/lib/api";
 import { echarts } from "@/lib/echarts";
@@ -104,6 +106,7 @@ export function Workbench() {
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [tier, setTier] = useState<"academic" | "mined" | "combo">("academic");
+  const [selectedId, setSelectedId] = useState<string>("");
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
@@ -130,12 +133,40 @@ export function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const strategy: WorkbenchStrategy | undefined = data?.strategies[0];
+  const strategy: WorkbenchStrategy | undefined =
+    data?.strategies.find(s => s.strategy_id === selectedId) ?? data?.strategies[0];
+  // 默认选中第一个策略
+  useEffect(() => {
+    if (!selectedId && data?.strategies?.length) setSelectedId(data.strategies[0].strategy_id);
+  }, [data, selectedId]);
   const phase = strategy?.phase ?? "research";
   const combo2 = data?.combo.metrics.backtest["COMBO2(BAB+52w)"];
   const autopilot = data?.autopilot;
   const hypotheses = data?.combo.hypotheses ?? [];
-  const review = data?.review;
+  // 复盘: 策略自身体检 + 全局组合层数据 (variants/variant_metrics/hypothesis_updates)
+  const review = {
+    ...(data?.review ?? {}),
+    ...(strategy?.review ?? {}),
+  } as WorkbenchReview;
+  const paper: WorkbenchStrategy["paper"] = strategy?.paper ?? {};
+
+  // --- 播种变体为新策略 (多策略并行) ---
+  const seededDefs = new Set((data?.strategies ?? []).map(s => s.signal_definition));
+  const seedVariant = async (h: ComboHypothesis) => {
+    if (!h.signal_definition || mutating) return;
+    setMutating(true);
+    try {
+      const name = (h.title ?? "").replace(/^基策略 /, "").slice(0, 36) || "变体策略";
+      const created = await api.seedStrategy(h.signal_definition, name);
+      toast.success(`已播种并行策略: ${created.name}`);
+      await load();
+      setSelectedId(created.strategy_id);
+    } catch (e) {
+      toast.error((e as { detail?: string })?.detail ?? "播种失败");
+    } finally {
+      setMutating(false);
+    }
+  };
 
   // --- 生命周期迁移 ---
   const transition = async (action: string, label: string) => {
@@ -157,9 +188,9 @@ export function Workbench() {
 
   // --- 模拟盘净值曲线 (反推法, 同 Combo 页) ---
   const navChart = useMemo(() => {
-    const trades = data?.combo.paper.trades;
+    const trades = paper?.trades?.length ? paper.trades : data?.combo.paper.trades;
     if (!trades?.length) return null;
-    let nav = data?.combo.paper.nav ?? 1;
+    let nav = paper?.nav ?? data?.combo.paper.nav ?? 1;
     const reversed: { d: string; v: number }[] = [];
     for (let i = trades.length - 1; i >= 0; i--) {
       reversed.unshift({ d: trades[i].to, v: nav });
@@ -169,7 +200,7 @@ export function Workbench() {
     const byDate = new Map<string, { d: string; v: number }>();
     for (const p of reversed) byDate.set(p.d, p);
     return Array.from(byDate.values());
-  }, [data]);
+  }, [data, paper]);
 
   useEffect(() => {
     if (!navChart) return;
@@ -266,10 +297,10 @@ export function Workbench() {
       { label: "累计收益", value: combo2 ? fmtPct(combo2.cum) : "--", color: "text-emerald-400" },
     ],
     paper: [
-      { label: "模拟盘净值", value: data?.combo.paper.nav != null ? data.combo.paper.nav.toFixed(4) : "--", color: "text-emerald-400" },
-      { label: "调仓次数", value: `${data?.combo.paper.trades?.length ?? 0}` },
-      { label: "起于", value: data?.combo.paper.started_at ? String(data.combo.paper.started_at).slice(0, 10) : "--" },
-      { label: "最新信号", value: data?.combo.signal.date ?? "--", color: "text-amber-400" },
+      { label: "模拟盘净值", value: paper?.nav != null ? paper.nav.toFixed(4) : "--", color: "text-emerald-400" },
+      { label: "调仓次数", value: `${paper?.trades?.length ?? 0}` },
+      { label: "起于", value: paper?.started_at ? String(paper.started_at).slice(0, 10) : "--" },
+      { label: "最新信号", value: paper?.last_signal_date ?? "--", color: "text-amber-400" },
     ],
     live: [
       { label: "引擎存活", value: autopilot?.health.alive ? "是" : "否", color: autopilot?.health.alive ? "text-emerald-400" : "text-rose-400" },
@@ -278,9 +309,9 @@ export function Workbench() {
       { label: "流水线", value: autopilot ? (PHASE_META[autopilot.pipeline.phase]?.label ?? autopilot.pipeline.phase) : "--" },
     ],
     review: [
-      { label: "vs 回测", value: review?.vs_backtest.outperforming == null ? "样本不足" : review.vs_backtest.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest.outperforming ? "text-emerald-400" : review?.vs_backtest.outperforming == null ? undefined : "text-rose-400" },
-      { label: "回撤超限", value: review?.vs_backtest.dd_breach ? "是" : "否", color: review?.vs_backtest.dd_breach ? "text-rose-400" : "text-emerald-400" },
-      { label: "信号新鲜度", value: review?.signal_health.stale ? "过期" : "正常", color: review?.signal_health.stale ? "text-amber-400" : "text-emerald-400" },
+      { label: "vs 回测", value: review?.vs_backtest?.outperforming == null ? "样本不足" : review.vs_backtest!.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest?.outperforming ? "text-emerald-400" : review?.vs_backtest?.outperforming == null ? undefined : "text-rose-400" },
+      { label: "回撤超限", value: review?.vs_backtest?.dd_breach ? "是" : "否", color: review?.vs_backtest?.dd_breach ? "text-rose-400" : "text-emerald-400" },
+      { label: "信号新鲜度", value: review?.signal_health?.stale ? "过期" : "正常", color: review?.signal_health?.stale ? "text-amber-400" : "text-emerald-400" },
       { label: "下一圈", value: review?.loop_next === "research" ? "回研究(回炉)" : "回组合(迭代)", color: review?.loop_next === "research" ? "text-rose-400" : "text-purple-400" },
     ],
   };
@@ -330,6 +361,37 @@ export function Workbench() {
           ))}
         </div>
       </div>
+
+      {/* Strategy tabs: 多策略并行切换 */}
+      {data?.strategies.length ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {data.strategies.map(s => {
+            const sp = s.phase === "paused" ? "paused" : s.phase;
+            const active = s.strategy_id === strategy?.strategy_id;
+            return (
+              <button
+                key={s.strategy_id}
+                onClick={() => setSelectedId(s.strategy_id)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition",
+                  active ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300" : "border-border bg-card text-muted-foreground hover:bg-accent",
+                )}
+              >
+                <span className="max-w-[180px] truncate">{s.name}</span>
+                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", PHASE_META[sp]?.bg ?? "bg-muted", PHASE_META[sp]?.color ?? "text-muted-foreground")}>
+                  {PHASE_META[sp]?.label ?? sp}
+                </span>
+                <span className="font-mono text-[10px] opacity-70">净值 {s.paper?.nav != null ? s.paper.nav.toFixed(3) : "--"}</span>
+              </button>
+            );
+          })}
+          {data.strategies.length === 1 && (
+            <span className="text-xs text-muted-foreground">
+              当前 1 条策略 — 组合层变体可播种为新策略并行运行
+            </span>
+          )}
+        </div>
+      ) : null}
 
       {/* Strategy identity */}
       {strategy && (
@@ -444,8 +506,8 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 今日信号
-                {data?.combo.signal.date && (
-                  <span className="text-xs font-normal text-muted-foreground">({data.combo.signal.date})</span>
+                {paper?.last_signal_date && (
+                  <span className="text-xs font-normal text-muted-foreground">({paper.last_signal_date})</span>
                 )}
               </h2>
               <div className="grid grid-cols-2 gap-3">
@@ -453,35 +515,35 @@ export function Workbench() {
                   <div className="text-xs text-emerald-400 mb-2 flex items-center gap-1">
                     <ArrowUpRight className="h-3.5 w-3.5" /> 做多
                   </div>
-                  {data?.combo.signal.longs.map(s => (
-                    <div key={s.symbol} className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
+                  {(paper?.longs ?? []).map(sym => (
+                    <div key={sym} className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
                       <div className="flex justify-between items-center">
-                        <span className="font-mono text-sm font-semibold">{s.symbol}</span>
-                        <span className="text-xs text-emerald-400 font-mono">{s.score.toFixed(2)}</span>
+                        <span className="font-mono text-sm font-semibold">{sym}</span>
+                        <span className="text-xs text-emerald-400 font-mono">{paper?.scores?.[sym]?.toFixed(2) ?? "--"}</span>
                       </div>
                       <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, Math.max(8, (s.score + 2) * 30))}%` }} />
+                        <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, Math.max(8, ((paper?.scores?.[sym] ?? 0) + 2) * 30))}%` }} />
                       </div>
                     </div>
                   ))}
-                  {!data?.combo.signal.longs.length && <div className="text-xs text-muted-foreground">等待每日信号…</div>}
+                  {!(paper?.longs?.length) && <div className="text-xs text-muted-foreground">等待每日信号…</div>}
                 </div>
                 <div>
                   <div className="text-xs text-rose-400 mb-2 flex items-center gap-1">
                     <ArrowDownRight className="h-3.5 w-3.5" /> 做空
                   </div>
-                  {data?.combo.signal.shorts.map(s => (
-                    <div key={s.symbol} className="mb-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-2.5">
+                  {(paper?.shorts ?? []).map(sym => (
+                    <div key={sym} className="mb-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-2.5">
                       <div className="flex justify-between items-center">
-                        <span className="font-mono text-sm font-semibold">{s.symbol}</span>
-                        <span className="text-xs text-rose-400 font-mono">{s.score.toFixed(2)}</span>
+                        <span className="font-mono text-sm font-semibold">{sym}</span>
+                        <span className="text-xs text-rose-400 font-mono">{paper?.scores?.[sym]?.toFixed(2) ?? "--"}</span>
                       </div>
                       <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full bg-rose-400" style={{ width: `${Math.min(100, Math.max(8, (Math.abs(s.score) + 0.5) * 30))}%` }} />
+                        <div className="h-full bg-rose-400" style={{ width: `${Math.min(100, Math.max(8, (Math.abs(paper?.scores?.[sym] ?? 0) + 0.5) * 30))}%` }} />
                       </div>
                     </div>
                   ))}
-                  {!data?.combo.signal.shorts.length && <div className="text-xs text-muted-foreground">等待每日信号…</div>}
+                  {!(paper?.shorts?.length) && <div className="text-xs text-muted-foreground">等待每日信号…</div>}
                 </div>
               </div>
             </div>
@@ -496,7 +558,7 @@ export function Workbench() {
                 </div>
               )}
               <div className="mt-2 text-xs text-muted-foreground">
-                {data?.combo.paper.trades?.length ?? 0} 次调仓记录 · 每日 07:00 自动更新
+                {paper?.trades?.length ?? 0} 次调仓记录 · 每日 07:00 自动更新
               </div>
             </div>
           </div>
@@ -759,6 +821,18 @@ export function Workbench() {
                         </>
                       )}
                       {h.status === "testing" && <span className="ml-auto text-amber-300">✅ 已晋升，可进模拟</span>}
+                      {h.signal_definition && !seededDefs.has(h.signal_definition) && (
+                        <button
+                          onClick={() => seedVariant(h)}
+                          disabled={mutating}
+                          className="ml-auto rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20 disabled:opacity-50"
+                        >
+                          + 播种为并行策略
+                        </button>
+                      )}
+                      {h.signal_definition && seededDefs.has(h.signal_definition) && (
+                        <span className="ml-auto text-[11px] text-muted-foreground">已在运行</span>
+                      )}
                     </div>
                   );
                 })}
