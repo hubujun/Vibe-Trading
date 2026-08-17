@@ -117,6 +117,7 @@ export function Workbench() {
   const combo2 = data?.combo.metrics.backtest["COMBO2(BAB+52w)"];
   const autopilot = data?.autopilot;
   const hypotheses = data?.combo.hypotheses ?? [];
+  const review = data?.review;
 
   // --- 生命周期迁移 ---
   const transition = async (action: string, label: string) => {
@@ -232,10 +233,10 @@ export function Workbench() {
       { label: "流水线", value: autopilot ? (PHASE_META[autopilot.pipeline.phase]?.label ?? autopilot.pipeline.phase) : "--" },
     ],
     review: [
-      { label: "假设记录", value: `${hypotheses.length}` },
-      { label: "在验证", value: `${hypotheses.filter(h => h.status === "validating").length}` },
-      { label: "通过", value: `${hypotheses.filter(h => h.status === "confirmed").length}`, color: "text-emerald-400" },
-      { label: "回撤控制", value: combo2 ? `${fmtPct(combo2.max_dd)}` : "--", color: "text-rose-400" },
+      { label: "vs 回测", value: review?.vs_backtest.outperforming == null ? "样本不足" : review.vs_backtest.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest.outperforming ? "text-emerald-400" : review?.vs_backtest.outperforming == null ? undefined : "text-rose-400" },
+      { label: "回撤超限", value: review?.vs_backtest.dd_breach ? "是" : "否", color: review?.vs_backtest.dd_breach ? "text-rose-400" : "text-emerald-400" },
+      { label: "信号新鲜度", value: review?.signal_health.stale ? "过期" : "正常", color: review?.signal_health.stale ? "text-amber-400" : "text-emerald-400" },
+      { label: "数据新鲜度", value: review?.data_freshness.stale ? "过期" : "正常", color: review?.data_freshness.stale ? "text-amber-400" : "text-emerald-400" },
     ],
   };
 
@@ -563,23 +564,93 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* Hypotheses */}
-          <div className="rounded-xl border bg-card p-4">
-            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-purple-400" />
-              假设注册表（复盘素材）
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {hypotheses.map(h => (
-                <div key={h.hypothesis_id} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium">{h.title}</span>
-                    <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">{h.status}</span>
-                  </div>
-                  <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{h.hypothesis_id}</div>
+          {/* Loop 反馈: 推荐动作 + 假设流转 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-xl border bg-card p-4">
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-400" />
+                复盘建议（Loop 反馈）
+                {review?.reviewed_at && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    · {String(review.reviewed_at).replace("T", " ").slice(0, 16)}
+                  </span>
+                )}
+              </h2>
+              {review?.recommendations?.length ? (
+                <div className="space-y-2">
+                  {review.recommendations.map((r, i) => (
+                    <div
+                      key={`${r.level}-${i}`}
+                      className={cn(
+                        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
+                        r.level === "critical" && "border-rose-500/30 bg-rose-500/5 text-rose-300",
+                        r.level === "warn" && "border-amber-500/30 bg-amber-500/5 text-amber-300",
+                        r.level === "info" && "border-border/60 bg-muted/30 text-muted-foreground",
+                      )}
+                    >
+                      <span className="mt-0.5 shrink-0">
+                        {r.level === "critical" ? "⛔" : r.level === "warn" ? "⚠️" : "ℹ️"}
+                      </span>
+                      <span>{r.text}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {!hypotheses.length && <div className="text-xs text-muted-foreground">暂无假设记录</div>}
+              ) : (
+                <div className="text-xs text-muted-foreground">复盘引擎数据不可用</div>
+              )}
+              {review?.hypothesis_updates?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">本轮假设自动流转</div>
+                  <div className="space-y-2">
+                    {review.hypothesis_updates.map((u, i) => (
+                      <div key={`${u.hypothesis_id}-${i}`} className="rounded-lg border border-border/50 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{u.title}</span>
+                          <span className="ml-auto shrink-0 font-mono text-muted-foreground">{u.hypothesis_id}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
+                          <span className="rounded bg-muted px-1.5 py-0.5">{u.from_status}</span>
+                          <ChevronRight className="h-3 w-3" />
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">{u.to_status}</span>
+                          <span className="truncate">· {u.reason}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            {/* 假设注册表 (复盘素材) */}
+            <div className="rounded-xl border bg-card p-4">
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-purple-400" />
+                假设注册表
+              </h2>
+              <div className="grid grid-cols-1 gap-3">
+                {hypotheses.map(h => (
+                  <div key={h.hypothesis_id} className="rounded-lg border border-border/50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{h.title}</span>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                          h.status === "validated" && "bg-emerald-500/20 text-emerald-400",
+                          h.status === "testing" && "bg-amber-500/20 text-amber-400",
+                          h.status === "monitoring" && "bg-cyan-500/20 text-cyan-400",
+                          h.status === "rejected" && "bg-rose-500/20 text-rose-400",
+                          h.status === "exploring" && "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {h.status}
+                      </span>
+                    </div>
+                    {h.thesis && <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{h.thesis}</div>}
+                    <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{h.hypothesis_id}</div>
+                  </div>
+                ))}
+                {!hypotheses.length && <div className="text-xs text-muted-foreground">暂无假设记录</div>}
+              </div>
             </div>
           </div>
         </>

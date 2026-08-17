@@ -115,11 +115,12 @@ class WorkbenchStrategy(BaseModel):
 
 
 class WorkbenchResponse(BaseModel):
-    """聚合视图: 策略状态机 + 研究数据 + 执行数据."""
+    """聚合视图: 策略状态机 + 研究数据 + 执行数据 + 复盘反馈."""
 
     strategies: list[WorkbenchStrategy] = Field(default_factory=list)
     combo: ComboSummary = Field(default_factory=ComboSummary)
     autopilot: AutopilotStatusResponse | None = None
+    review: dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[str] = None
 
 
@@ -309,7 +310,7 @@ def register_workbench_routes(
         dependencies=[Depends(require_auth)],
     )
     async def workbench_summary() -> WorkbenchResponse:
-        """聚合视图: 策略状态机 + combo 研究/模拟 + autopilot 执行."""
+        """聚合视图: 策略状态机 + combo 研究/模拟 + autopilot 执行 + 复盘反馈."""
         strategies = [WorkbenchStrategy(**s) for s in _read_strategies()]
         try:
             autopilot = _load_autopilot_status()
@@ -326,10 +327,23 @@ def register_workbench_routes(
         except Exception:  # noqa: BLE001
             logger.warning("workbench: combo aggregation failed", exc_info=True)
             combo = ComboSummary()
+        try:
+            # Loop Engineering 第一圈闭环: 复盘引擎 (体检 + 假设自动流转)
+            from src.strategy.review_engine import compute_review
+
+            review = compute_review(
+                combo_state_path=_COMBO_RUNTIME_ROOT / "state.json",
+                metrics_path=_COMBO_RUNTIME_ROOT / "backtest_metrics.json",
+                hypotheses_path=Path.home() / ".vibe-trading" / "hypotheses.json",
+            ).to_dict()
+        except Exception:  # noqa: BLE001
+            logger.warning("workbench: review engine failed", exc_info=True)
+            review = {}
         return WorkbenchResponse(
             strategies=strategies,
             combo=combo,
             autopilot=autopilot,
+            review=review,
             updated_at=_now_iso(),
         )
 
