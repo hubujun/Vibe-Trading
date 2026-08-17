@@ -44,6 +44,11 @@ DD_BREACH_MULTIPLIER = 1.5
 SIGNAL_STALE_DAYS = 2
 #: 回测指标过期天数
 METRICS_STALE_DAYS = 30
+#: 参数自适应 — 杠杆乘子区间与步长 (第三圈)
+EXPOSURE_MIN = 0.25
+EXPOSURE_MAX = 1.0
+EXPOSURE_STEP = 0.5  # 降杠杆步长
+EXPOSURE_RECOVER_STEP = 0.1  # 恢复步长
 
 
 def _utc_now() -> str:
@@ -85,6 +90,7 @@ class ReviewVsBacktest:
     outperforming: bool | None = None
     sample_sufficient: bool = False
     paper_trades: int = 0
+    consecutive_losses: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -133,11 +139,27 @@ class ReviewRecommendation:
 
 
 @dataclass
+class ReviewAdaptation:
+    """一条参数自适应变更 (第三圈: review 输出 → 策略参数)."""
+
+    param: str
+    from_value: float
+    to_value: float
+    reason: str
+    at: str = field(default_factory=_utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.__dict__.copy()
+
+
+@dataclass
 class StrategyReview:
     vs_backtest: ReviewVsBacktest = field(default_factory=ReviewVsBacktest)
     signal_health: ReviewSignalHealth = field(default_factory=ReviewSignalHealth)
     data_freshness: ReviewDataFreshness = field(default_factory=ReviewDataFreshness)
     hypothesis_updates: list[ReviewHypothesisUpdate] = field(default_factory=list)
+    adaptations: list[ReviewAdaptation] = field(default_factory=list)
+    variants: list[dict[str, Any]] = field(default_factory=list)
     recommendations: list[ReviewRecommendation] = field(default_factory=list)
     reviewed_at: str = field(default_factory=_utc_now)
 
@@ -147,6 +169,8 @@ class StrategyReview:
             "signal_health": self.signal_health.to_dict(),
             "data_freshness": self.data_freshness.to_dict(),
             "hypothesis_updates": [u.to_dict() for u in self.hypothesis_updates],
+            "adaptations": [a.to_dict() for a in self.adaptations],
+            "variants": list(self.variants),
             "recommendations": [r.to_dict() for r in self.recommendations],
             "reviewed_at": self.reviewed_at,
         }
@@ -219,6 +243,7 @@ def compute_review(
     vs = review.vs_backtest
     vs.paper_trades = len(trades)
     vs.sample_sufficient = len(trades) >= MIN_TRADES
+    vs.consecutive_losses = _consecutive_losses(trades)
 
     if nav is not None:
         vs.paper_nav = float(nav)
@@ -402,3 +427,71 @@ def _persist_hypothesis_update(
         )
     except Exception:  # noqa: BLE001
         logger.warning("review: persist hypothesis update failed for %s", update.hypothesis_id)
+
+
+# ============================================================================
+# 第三圈: 参数自适应 (复盘体检 → 策略参数)
+# ============================================================================
+
+
+def compute_adaptations(
+    review: StrategyReview,
+    current_params: dict[str, Any] | None = None,
+) -> list[ReviewAdaptation]:
+    """根据复盘体检计算参数自适应变更 (仅计算, 由调用方应用持久化).
+
+    规则 (与用户风控偏好一致):
+    - 回撤超限 (dd_breach)        → exposure_multiplier *= 0.5 (下限 0.25)
+    - 连续亏损 >= 3 笔            → exposure_multiplier *= 0.5 (下限 0.25)
+    - 样本足且跑赢回测            → exposure_multiplier += 0.1 (上限 1.0)
+
+    Args:
+        review: 复盘引擎输出.
+        current_params: 策略当前参数 (含 exposure_multiplier), 缺省取默认值.
+
+    Returns:
+        需要应用的参数变更列表 (空 = 无需调整).
+    """
+    current = float((current_params or {}).get("exposure_multiplier", 1.0))
+    vs = review.vs_backtest
+    adaptations: list[ReviewAdaptation] = []
+
+    def _step_down(reason: str) -> None:
+        nonlocal current
+        target = round(max(current * EXPOSURE_STEP, EXPOSURE_MIN), 2)
+        if target < current:
+            adaptations.append(
+                ReviewAdaptation(
+                    param="exposure_multiplier",
+                    from_value=current,
+                    to_value=target,
+                    reason=reason,
+                )
+            )
+            current = target
+
+    def _step_up(reason: str) -> None:
+        nonlocal current
+        target = round(min(current + EXPOSURE_RECOVER_STEP, EXPOSURE_MAX), 2)
+        if target > current:
+            adaptations.append(
+                ReviewAdaptation(
+                    param="exposure_multiplier",
+                    from_value=current,
+                    to_value=target,
+                    reason=reason,
+                )
+            )
+            current = target
+
+    if vs.dd_breach:
+        _step_down(
+            f"回撤 {vs.current_dd}% 超回测最大回撤 {vs.backtest_max_dd}% 的 "
+            f"{DD_BREACH_MULTIPLIER} 倍 → 自动降杠杆"
+        )
+    if vs.consecutive_losses >= CONSECUTIVE_LOSSES:
+        _step_down(f"连续 {vs.consecutive_losses} 笔亏损 (≥{CONSECUTIVE_LOSSES}) → 自动降杠杆")
+    if vs.sample_sufficient and vs.outperforming is True:
+        _step_up(f"样本 {vs.paper_trades} 笔跑赢回测 → 逐步恢复杠杆")
+
+    return adaptations

@@ -16,7 +16,23 @@ SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
            'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT']
 COST = 0.001
 STATE_PATH = '/Users/laohu/.vibe-trading/runs/paper_combo/state.json'
+WORKBENCH_PATH = '/Users/laohu/.vibe-trading/workbench/strategies.json'
 DAYS = 800
+
+
+def load_exposure_multiplier() -> float:
+    """读取工作台参数自适应结果 (第三圈): combo_bab_52w 的 exposure_multiplier.
+
+    复盘引擎检测到回撤超限/连亏时自动降杠杆, 这里把它乘到每期收益上.
+    """
+    try:
+        raw = json.load(open(WORKBENCH_PATH))
+        for s in raw.get('strategies', []):
+            if s.get('strategy_id') == 'combo_bab_52w':
+                return float(s.get('params', {}).get('exposure_multiplier', 1.0))
+    except Exception:
+        pass
+    return 1.0
 
 
 def fetch_okx_daily(symbol: str, days: int = DAYS) -> pd.Series:
@@ -77,6 +93,7 @@ def build_signal() -> dict:
             pass
     if state.get('last_signal_date') and state['last_longs']:
         try:
+            mult = load_exposure_multiplier()  # 第三圈: 参数自适应
             prev_day = pd.Timestamp(state['last_signal_date']).date()
             last_day = last_date.date()
             # 关键: 用 .date() 比较, OKX 日K ts 转本地后是当日16:00, 与 prev 的00:00
@@ -88,12 +105,13 @@ def build_signal() -> dict:
                 if len(seg) >= 1:
                     r_long = seg[state['last_longs']].mean(axis=1).sum()
                     r_short = -seg[state['last_shorts']].mean(axis=1).sum()
-                    # 每日多空等权, 单边成本摊到每次调仓
-                    net = (r_long + r_short) / 2 - COST
+                    # 每日多空等权, 单边成本摊到每次调仓, 乘自适应杠杆
+                    net = ((r_long + r_short) / 2 - COST) * mult
                     state['nav'] *= (1 + net)
                     state['trades'].append({
                         'from': str(prev_day), 'to': str(last_day),
                         'ret': round(net * 100, 2),
+                        'exposure_multiplier': mult,
                     })
         except Exception as e:
             print('  track 更新失败:', e)

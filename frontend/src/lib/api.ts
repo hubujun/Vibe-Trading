@@ -1526,6 +1526,14 @@ export interface WorkbenchStrategy {
   rebalance: string;
   phase: string; // research | paper | live | paused
   paused_from?: string | null;
+  params?: Record<string, number>;
+  adaptation_history?: Array<{
+    param: string;
+    from_value: number;
+    to_value: number;
+    reason: string;
+    at: string;
+  }>;
   phase_history: WorkbenchPhaseEvent[];
   updated_at?: string | null;
 }
@@ -1573,12 +1581,32 @@ export interface WorkbenchReviewRecommendation {
   text: string;
 }
 
+/** 参数自适应变更 (第三圈). */
+export interface WorkbenchReviewAdaptation {
+  param: string;
+  from_value: number;
+  to_value: number;
+  reason: string;
+  at: string;
+}
+
+/** 下一代实验候选 (第二圈). */
+export interface WorkbenchReviewVariant {
+  hypothesis_id: string;
+  title: string;
+  signal_definition: string;
+  status: string;
+  variant_name: string;
+}
+
 /** 复盘引擎输出: 体检 + 假设自动流转 + 推荐动作 (Loop Engineering 闭环). */
 export interface WorkbenchReview {
   vs_backtest: WorkbenchReviewVsBacktest;
   signal_health: WorkbenchReviewHealth;
   data_freshness: WorkbenchReviewHealth;
   hypothesis_updates: WorkbenchReviewHypothesisUpdate[];
+  adaptations: WorkbenchReviewAdaptation[];
+  variants: WorkbenchReviewVariant[];
   recommendations: WorkbenchReviewRecommendation[];
   reviewed_at: string;
 }
