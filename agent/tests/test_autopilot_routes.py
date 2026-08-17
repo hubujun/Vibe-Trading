@@ -590,3 +590,72 @@ class TestPerformanceEndpoint:
         assert body["live_scale"] == 10.0
         assert body["live_scale_state"]["tier_index"] == 1
         assert body["by_factor"]["alpha_gap_01"]["price_gap_bps"] == -4.0
+
+
+# ---------------------------------------------------------------------------
+# Factor stats aggregation (因子实绩: 交易数/胜率/PF/Sharpe)
+# ---------------------------------------------------------------------------
+
+
+class TestFactorStats:
+    def test_factor_stats_aggregation(self, tmp_path: Path, monkeypatch) -> None:
+        """按 alpha_id 聚合: 交易数/胜率/PF/Sharpe/PnL."""
+        monkeypatch.setattr(autopilot_routes, "_RUNTIME_ROOT", tmp_path)
+        _write_trades(
+            tmp_path,
+            [
+                # vol_x: 3 胜 1 负 → 胜率 0.75, PF = 17/5 = 3.4, PnL +12
+                {"engine": "paper", "symbol": "BTC-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": 10.0,
+                 "alpha_id": "vol_x", "ts": "2026-08-01T00:00:00Z"},
+                {"engine": "paper", "symbol": "ETH-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": 5.0,
+                 "alpha_id": "vol_x", "ts": "2026-08-02T00:00:00Z"},
+                {"engine": "paper", "symbol": "SOL-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": 2.0,
+                 "alpha_id": "vol_x", "ts": "2026-08-03T00:00:00Z"},
+                {"engine": "paper", "symbol": "BTC-USDT", "side": "sell",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": -5.0,
+                 "alpha_id": "vol_x", "ts": "2026-08-04T00:00:00Z"},
+                # mom_y: 2 负 → PF 0.0
+                {"engine": "paper", "symbol": "DOGE-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": -3.0,
+                 "alpha_id": "mom_y", "ts": "2026-08-01T00:00:00Z"},
+                {"engine": "paper", "symbol": "DOGE-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": -2.0,
+                 "alpha_id": "mom_y", "ts": "2026-08-02T00:00:00Z"},
+            ],
+        )
+
+        stats = autopilot_routes.load_factor_stats_for_dashboard()
+
+        assert stats is not None
+        vx = stats["vol_x"]
+        assert vx["trades"] == 4
+        assert vx["wins"] == 3
+        assert vx["losses"] == 1
+        assert vx["win_rate"] == 0.75
+        assert vx["profit_factor"] == 3.4
+        assert vx["realized_pnl"] == 12.0
+        my = stats["mom_y"]
+        assert my["trades"] == 2
+        assert my["win_rate"] == 0.0
+        assert my["profit_factor"] == 0.0
+
+    def test_factor_stats_all_wins_infinite_pf(self, tmp_path: Path, monkeypatch) -> None:
+        """全胜因子 → PF = None (前端显示 ∞)."""
+        monkeypatch.setattr(autopilot_routes, "_RUNTIME_ROOT", tmp_path)
+        _write_trades(
+            tmp_path,
+            [
+                {"engine": "paper", "symbol": "BTC-USDT", "side": "buy",
+                 "notional": 25.0, "price": 100.0, "realized_pnl": 8.0,
+                 "alpha_id": "perfect", "ts": "2026-08-01T00:00:00Z"},
+            ],
+        )
+
+        stats = autopilot_routes.load_factor_stats_for_dashboard()
+
+        assert stats["perfect"]["profit_factor"] is None
+        assert stats["perfect"]["win_rate"] == 1.0
+
