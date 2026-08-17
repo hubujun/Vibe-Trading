@@ -1535,7 +1535,52 @@ export interface WorkbenchResponse {
   strategies: WorkbenchStrategy[];
   combo: ComboSummary;
   autopilot: AutopilotStatus | null;
+  review: WorkbenchReview;
   updated_at?: string | null;
+}
+
+/** 复盘引擎体检: 模拟盘 vs 回测. */
+export interface WorkbenchReviewVsBacktest {
+  paper_nav: number | null;
+  paper_annual: number | null;
+  backtest_annual: number | null;
+  backtest_max_dd: number | null;
+  current_dd: number | null;
+  dd_breach: boolean;
+  outperforming: boolean | null;
+  sample_sufficient: boolean;
+  paper_trades: number;
+}
+
+/** 复盘引擎体检: 信号/数据新鲜度. */
+export interface WorkbenchReviewHealth {
+  last_signal_date: string | null;
+  signal_age_days: number | null;
+  stale: boolean;
+}
+
+export interface WorkbenchReviewHypothesisUpdate {
+  hypothesis_id: string;
+  title: string;
+  from_status: string;
+  to_status: string;
+  reason: string;
+  at: string;
+}
+
+export interface WorkbenchReviewRecommendation {
+  level: "info" | "warn" | "critical";
+  text: string;
+}
+
+/** 复盘引擎输出: 体检 + 假设自动流转 + 推荐动作 (Loop Engineering 闭环). */
+export interface WorkbenchReview {
+  vs_backtest: WorkbenchReviewVsBacktest;
+  signal_health: WorkbenchReviewHealth;
+  data_freshness: WorkbenchReviewHealth;
+  hypothesis_updates: WorkbenchReviewHypothesisUpdate[];
+  recommendations: WorkbenchReviewRecommendation[];
+  reviewed_at: string;
 }
 
 export interface AutopilotStatus {
