@@ -63,8 +63,21 @@ DAYS = 800
 COST = 0.001
 PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
 
-#: academic 因子 → 模块名映射
-ACADEMIC_MODULES: dict[str, str] = {"BAB": "bab", "RMW": "rmw", "high52w": "high52w"}
+#: academic 因子 → 模块名映射 (全部 13 个, 均只需 close ± volume)
+ACADEMIC_MODULES: dict[str, str] = {
+    "BAB": "bab",
+    "RMW": "rmw",
+    "high52w": "high52w",
+    "carhart_mom": "carhart_mom",
+    "cma": "cma",
+    "corr_rewire": "corr_rewire",
+    "hml": "hml",
+    "illiq": "illiq",
+    "mkt_rf": "mkt_rf",
+    "retskew": "retskew",
+    "smb": "smb",
+    "strev": "strev",
+}
 
 
 # ============================================================================
