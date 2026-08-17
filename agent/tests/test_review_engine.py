@@ -308,3 +308,28 @@ class TestAdaptations:
         d = review.to_dict()
         assert d["adaptations"] == []
         assert d["variants"] == []
+        assert d["loop_next"] == "compose"
+
+    def test_loop_next_research_on_dd_breach(self, tmp_path: Path) -> None:
+        from src.strategy.review_engine import ReviewVsBacktest, compute_review
+
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps(_make_state(nav=0.8, trades=_dd_trades())), encoding="utf-8")
+        metrics = tmp_path / "backtest_metrics.json"
+        metrics.write_text(json.dumps(_make_metrics(max_dd=-10.62)), encoding="utf-8")
+
+        review = compute_review(state, metrics)
+
+        assert review.loop_next == "research"
+
+    def test_loop_next_compose_when_healthy(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(
+            json.dumps(_make_state(nav=1.2, trades=_winning_trades(MIN_TRADES))), encoding="utf-8"
+        )
+        metrics = tmp_path / "backtest_metrics.json"
+        metrics.write_text(json.dumps(_make_metrics(annual=8.0, max_dd=-10.0)), encoding="utf-8")
+
+        review = compute_review(state, metrics)
+
+        assert review.loop_next == "compose"

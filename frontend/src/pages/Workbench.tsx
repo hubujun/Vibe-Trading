@@ -280,7 +280,7 @@ export function Workbench() {
       { label: "vs 回测", value: review?.vs_backtest.outperforming == null ? "样本不足" : review.vs_backtest.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest.outperforming ? "text-emerald-400" : review?.vs_backtest.outperforming == null ? undefined : "text-rose-400" },
       { label: "回撤超限", value: review?.vs_backtest.dd_breach ? "是" : "否", color: review?.vs_backtest.dd_breach ? "text-rose-400" : "text-emerald-400" },
       { label: "信号新鲜度", value: review?.signal_health.stale ? "过期" : "正常", color: review?.signal_health.stale ? "text-amber-400" : "text-emerald-400" },
-      { label: "数据新鲜度", value: review?.data_freshness.stale ? "过期" : "正常", color: review?.data_freshness.stale ? "text-amber-400" : "text-emerald-400" },
+      { label: "下一圈", value: review?.loop_next === "research" ? "回研究(回炉)" : "回组合(迭代)", color: review?.loop_next === "research" ? "text-rose-400" : "text-purple-400" },
     ],
   };
 
@@ -373,11 +373,16 @@ export function Workbench() {
                     <div className="flex flex-col items-center gap-1.5">
                       <div
                         className={cn(
-                          "flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
+                          "relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all",
                           active ? cn(meta.border, meta.bg, "scale-110") : passed ? "border-cyan-500/50 bg-cyan-500/10" : "border-border bg-muted/40",
                         )}
                       >
                         <Icon className={cn("h-5 w-5", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
+                        {p === "review" && (passed || active) && (
+                          <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500/40 text-[10px] font-bold text-purple-200">
+                            ↺
+                          </span>
+                        )}
                       </div>
                       <span className={cn("text-xs font-medium", active ? meta.color : "text-muted-foreground")}>
                         {meta.label}
@@ -387,6 +392,20 @@ export function Workbench() {
                   </div>
                 );
               })}
+            </div>
+            {/* 循环点说明: 复盘之后去哪 */}
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/60 pt-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <RefreshCw className="h-3 w-3 text-purple-400" />
+                循环点: 复盘 → 组合 — 基策略有效时自动生成下一代变体
+              </span>
+              <span className="flex items-center gap-1">
+                <Undo2 className="h-3 w-3 text-amber-400" />
+                复盘 → 研究 — 回撤超限 / 连亏 3 笔时回炉
+              </span>
+              <span className={cn("ml-auto font-medium", review?.loop_next === "research" ? "text-rose-400" : "text-purple-400")}>
+                {review?.loop_next === "research" ? "⚠️ 当前下一圈: 回研究" : "↺ 当前下一圈: 回组合"}
+              </span>
             </div>
           </div>
 

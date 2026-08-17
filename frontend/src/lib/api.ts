@@ -1982,6 +1982,7 @@ export interface WorkbenchReview {
     { annual: number | null; sharpe: number | null; max_dd: number | null; cum: number | null; backtested_at: string | null }
   >;
   recommendations: WorkbenchReviewRecommendation[];
+  loop_next: string; // compose(回组合迭代) | research(回研究回炉)
   reviewed_at: string;
 }
 
