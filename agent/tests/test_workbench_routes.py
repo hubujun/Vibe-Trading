@@ -217,6 +217,37 @@ class TestTransition:
 
         assert response.status_code == 409
 
+
+class TestDeleteStrategy:
+    def test_delete_seeded_strategy(self, tmp_path: Path, monkeypatch) -> None:
+        """播种的变体策略可删除; 删后 404."""
+        client = _client(tmp_path, monkeypatch)
+        r = client.post(
+            "/api/workbench/strategies",
+            json={
+                "signal_definition": "combo_variant: factors=[BAB,high52w,volume_surge_reversal] weights={BAB:0.33,high52w:0.33,volume_surge_reversal:0.33} top_n=3 bot_n=3",
+                "name": "临时变体",
+            },
+        )
+        assert r.status_code == 200
+        sid = r.json()["strategy_id"]
+        assert sid != "combo_bab_52w"
+
+        d = client.delete(f"/api/workbench/strategies/{sid}")
+        assert d.status_code == 200
+        assert d.json()["deleted"] == sid
+
+        r2 = client.delete(f"/api/workbench/strategies/{sid}")
+        assert r2.status_code == 404
+
+    def test_delete_base_strategy_rejected(self, tmp_path: Path, monkeypatch) -> None:
+        """基策略 (默认种子) 不可删除."""
+        client = _client(tmp_path, monkeypatch)
+
+        r = client.delete("/api/workbench/strategies/combo_bab_52w")
+
+        assert r.status_code == 400
+
     def test_unknown_strategy_404(self, tmp_path: Path, monkeypatch) -> None:
         client = _client(tmp_path, monkeypatch)
 
