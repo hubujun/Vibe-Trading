@@ -198,11 +198,14 @@ class TestHaltAndCounter:
 
     def test_status_reflects_daily_counter(self, tmp_path: Path, monkeypatch) -> None:
         """The persisted counter surfaces date + count for the cap gauge."""
-        _write_counter(tmp_path, "2026-08-09", 6)
+        from datetime import datetime, timezone
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _write_counter(tmp_path, today, 6)
         client = _client(tmp_path, monkeypatch)
 
         body = client.get("/api/autopilot/status").json()
-        assert body["counter"]["date"] == "2026-08-09"
+        assert body["counter"]["date"] == today
         assert body["counter"]["count"] == 6
 
     def test_status_handles_corrupt_counter(self, tmp_path: Path, monkeypatch) -> None:

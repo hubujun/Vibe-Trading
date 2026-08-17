@@ -311,6 +311,40 @@ class FactorStore:
             ids.append(py_file.stem)
         return ids
 
+    def list_factors_with_meta(self) -> list[dict[str, Any]]:
+        """List zoo factors enriched with their ``__alpha_meta__`` details.
+
+        Same scan as :meth:`list_factors`, but each entry is a dict with
+        the alpha_id plus the factor's nickname, theme, formula (LaTeX),
+        universe, frequency, decay horizon, warmup and notes. Metadata is
+        AST-extracted (no import) via :func:`load_alpha_meta_from_py`;
+        factors whose metadata fails to parse are included with
+        ``meta_ok=False`` rather than dropped, so the dashboard always
+        shows the full inventory.
+
+        Returns:
+            Sorted list of ``{"alpha_id": str, "meta": {...} | None,
+            "meta_ok": bool}`` dicts.
+        """
+        if not self.zoo_root.is_dir():
+            return []
+
+        from src.factors.registry import load_alpha_meta_from_py
+
+        factors: list[dict[str, Any]] = []
+        for py_file in sorted(self.zoo_root.glob("*.py")):
+            if py_file.name.startswith("_"):
+                continue
+            entry: dict[str, Any] = {"alpha_id": py_file.stem, "meta": None, "meta_ok": False}
+            try:
+                meta = load_alpha_meta_from_py(py_file)
+                entry["meta"] = meta.model_dump()
+                entry["meta_ok"] = True
+            except Exception as exc:  # noqa: BLE001 — best-effort enrichment
+                logger.warning("FactorStore: meta parse failed for %s: %s", py_file.name, exc)
+            factors.append(entry)
+        return factors
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
