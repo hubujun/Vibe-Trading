@@ -67,6 +67,7 @@ class ComboHypothesis(BaseModel):
     title: str
     status: str
     thesis: str = ""
+    signal_definition: str = ""
 
 
 class ComboSummary(BaseModel):
@@ -135,6 +136,7 @@ def _load_hypotheses() -> list[ComboHypothesis]:
                     title=str(h.get("title", "")),
                     status=str(h.get("status", "")),
                     thesis=str(h.get("thesis", "")),
+                    signal_definition=str(h.get("signal_definition", "") or ""),
                 )
             )
         except Exception:  # noqa: BLE001

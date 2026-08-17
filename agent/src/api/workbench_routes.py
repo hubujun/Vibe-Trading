@@ -75,8 +75,12 @@ DEFAULT_STRATEGIES: list[dict[str, Any]] = [
         "description": "低波动异象 × 52周高点动量 · 等权横截面 · 多 top3 空 bottom3 · 单边成本 0.1%",
         "factors": ["BAB", "high52w"],
         "weights": {"BAB": 0.5, "high52w": 0.5},
+        "top_n": 3,
+        "bot_n": 3,
         "universe_size": 10,
         "rebalance": "日频 · 每日 07:00",
+        "signal_definition": "combo_variant: weights={BAB:0.5,high52w:0.5} top_n=3 bot_n=3",
+        "run_dir": str(_COMBO_RUNTIME_ROOT),
     },
 ]
 
@@ -106,14 +110,22 @@ class WorkbenchStrategy(BaseModel):
     description: str = ""
     factors: list[str] = Field(default_factory=list)
     weights: dict[str, float] = Field(default_factory=dict)
+    top_n: int = 3
+    bot_n: int = 3
     universe_size: int = 0
     rebalance: str = ""
+    #: 可解析的信号定义 (daily_signal 按此生成信号) + 独立运行目录
+    signal_definition: str = ""
+    run_dir: str = ""
     phase: str = "research"
     paused_from: Optional[str] = None
     params: dict[str, Any] = Field(default_factory=dict)
     adaptation_history: list[dict[str, Any]] = Field(default_factory=list)
     phase_history: list[WorkbenchPhaseEvent] = Field(default_factory=list)
     updated_at: Optional[str] = None
+    #: 运行时数据 (GET 聚合时填充): 模拟盘摘要 + 复盘输出
+    paper: dict[str, Any] = Field(default_factory=dict)
+    review: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkbenchResponse(BaseModel):
@@ -138,6 +150,14 @@ class TransitionRequest(BaseModel):
     note: Optional[str] = None
 
 
+class SeedStrategyRequest(BaseModel):
+    """从组合层变体播种新策略 (多策略并行入口)."""
+
+    signal_definition: str = Field(..., description="combo_variant: ... 可解析的信号定义")
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
 # ============================================================================
 # 状态机持久化 (fail-open)
 # ============================================================================
@@ -148,12 +168,26 @@ def _now_iso() -> str:
 
 
 def _read_strategies() -> list[dict[str, Any]]:
-    """读取持久化策略列表; 缺失/损坏时返回默认种子. 只读不改文件."""
+    """读取持久化策略列表; 缺失/损坏时返回默认种子. 只读不改文件.
+
+    旧记录 (无 signal_definition/run_dir) 按默认主策略字段迁移补齐.
+    """
+    defaults = DEFAULT_STRATEGIES[0]
     try:
         raw = json.loads(_STRATEGIES_PATH.read_text(encoding="utf-8"))
         strategies = raw.get("strategies", [])
         if isinstance(strategies, list) and strategies:
-            return strategies
+            migrated = []
+            for s in strategies:
+                s = dict(s)
+                if not s.get("signal_definition"):
+                    s["signal_definition"] = defaults["signal_definition"]
+                if not s.get("run_dir"):
+                    s["run_dir"] = defaults["run_dir"]
+                s.setdefault("top_n", defaults["top_n"])
+                s.setdefault("bot_n", defaults["bot_n"])
+                migrated.append(s)
+            return migrated
     except (OSError, ValueError, TypeError):
         pass
     return _seed_strategies()
@@ -396,44 +430,84 @@ def register_workbench_routes(
             logger.warning("workbench: combo aggregation failed", exc_info=True)
             combo = ComboSummary()
         try:
-            # Loop Engineering 第一圈: 复盘引擎 (体检 + 假设自动流转)
-            from src.strategy.review_engine import compute_adaptations, compute_review
+            # Loop Engineering: 每策略独立复盘 (体检 + 假设流转 + 自适应)
+            from src.strategy.review_engine import compute_review
 
-            review = compute_review(
-                combo_state_path=_COMBO_RUNTIME_ROOT / "state.json",
-                metrics_path=_COMBO_RUNTIME_ROOT / "backtest_metrics.json",
-                hypotheses_path=Path.home() / ".vibe-trading" / "hypotheses.json",
-            )
-            # 第三圈: 参数自适应 — 应用复盘输出到策略参数
-            applied = _apply_adaptations(review, raw_strategies)
-            review.adaptations.extend(applied["adaptations"])
-            raw_strategies = applied["strategies"]
-            # 第二圈: 变体生成 — 已验证基策略自动产下一代实验候选
-            try:
-                from src.hypotheses.registry import HypothesisRegistry
-                from src.strategy.variant_backtester import load_backtest_cache
-                from src.strategy.variant_generator import generate_variants
+            from src.hypotheses.registry import HypothesisRegistry
+            from src.strategy.variant_backtester import load_backtest_cache
+            from src.strategy.variant_generator import generate_variants
 
-                registry = HypothesisRegistry(Path.home() / ".vibe-trading" / "hypotheses.json")
-                variants = generate_variants(registry, max_new=2)
-                review.variants = variants
-                # 第四圈: 附带回测缓存指标 (signal_definition → metrics 关联到 hypothesis_id)
-                cache = load_backtest_cache()
-                variant_metrics: dict[str, dict[str, Any]] = {}
-                for h in registry.list():
-                    sd = str(getattr(h, "signal_definition", "") or "")
-                    if sd in cache:
-                        m = cache[sd]
-                        variant_metrics[str(h.hypothesis_id)] = {
-                            k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum", "backtested_at")
-                        }
-                review.variant_metrics = variant_metrics
-            except Exception:  # noqa: BLE001
-                logger.warning("workbench: variant generation failed", exc_info=True)
-            review_dict = review.to_dict()
+            hypotheses_path = Path.home() / ".vibe-trading" / "hypotheses.json"
+            registry = HypothesisRegistry(hypotheses_path)
+            backtest_cache = load_backtest_cache()
+            # 第二圈: 变体生成 (全局, 供组合层)
+            variants = generate_variants(registry, max_new=2)
+            variant_metrics: dict[str, dict[str, Any]] = {}
+            for h in registry.list():
+                sd = str(getattr(h, "signal_definition", "") or "")
+                if sd in backtest_cache:
+                    m = backtest_cache[sd]
+                    variant_metrics[str(h.hypothesis_id)] = {
+                        k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum", "backtested_at")
+                    }
+
+            # per-strategy: 模拟盘摘要 + 复盘 + 参数自适应
+            global_hypothesis_updates: list[dict[str, Any]] = []
+            for s in raw_strategies:
+                run_dir = Path(s.get("run_dir") or _COMBO_RUNTIME_ROOT)
+                # 模拟盘摘要
+                paper: dict[str, Any] = {}
+                try:
+                    st = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+                    paper = {
+                        "nav": st.get("nav"),
+                        "started_at": st.get("started_at"),
+                        "last_signal_date": st.get("last_signal_date"),
+                        "longs": st.get("last_longs", []),
+                        "shorts": st.get("last_shorts", []),
+                        "scores": st.get("scores", {}),
+                        "trades": (st.get("trades") or [])[-5:],
+                    }
+                except (OSError, ValueError, TypeError):
+                    pass
+                s["paper"] = paper
+                # 复盘: 基准备用该策略自己的回测缓存 (变体回测结果), 无则回退 COMBO2
+                baseline = None
+                sd = s.get("signal_definition") or ""
+                if sd in backtest_cache:
+                    m = backtest_cache[sd]
+                    baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
+                try:
+                    r = compute_review(
+                        run_dir / "state.json",
+                        _COMBO_RUNTIME_ROOT / "backtest_metrics.json",
+                        hypotheses_path=hypotheses_path,
+                        baseline=baseline,
+                    )
+                    # 第三圈: 参数自适应 — 应用到该策略自身
+                    applied = _apply_adaptations(r, [s])
+                    r.adaptations.extend(applied["adaptations"])
+                    review_dict = r.to_dict()
+                    # 假设流转记录只在基策略上收 (幂等, 避免重复)
+                    if not global_hypothesis_updates:
+                        global_hypothesis_updates = review_dict.get("hypothesis_updates", [])
+                    review_dict.pop("hypothesis_updates", None)
+                    review_dict.pop("variants", None)
+                    review_dict.pop("variant_metrics", None)
+                    s["review"] = review_dict
+                except Exception:  # noqa: BLE001
+                    logger.warning("workbench: review failed for %s", s.get("strategy_id"), exc_info=True)
+                    s["review"] = {}
         except Exception:  # noqa: BLE001
-            logger.warning("workbench: review engine failed", exc_info=True)
-            review_dict = {}
+            logger.warning("workbench: loop aggregation failed", exc_info=True)
+            variants, variant_metrics, global_hypothesis_updates = [], {}, []
+
+        review_dict = {
+            "hypothesis_updates": global_hypothesis_updates,
+            "variants": variants,
+            "variant_metrics": variant_metrics,
+            "reviewed_at": _now_iso(),
+        }
         return WorkbenchResponse(
             strategies=[WorkbenchStrategy(**s) for s in raw_strategies],
             combo=combo,
@@ -458,3 +532,79 @@ def register_workbench_routes(
     ) -> WorkbenchStrategy:
         """推进/回退/暂停/恢复一条策略的生命周期."""
         return _transition(strategy_id, body.action, body.note)
+
+    @app.post(
+        "/api/workbench/strategies",
+        response_model=WorkbenchStrategy,
+        dependencies=[Depends(require_auth)],
+    )
+    async def workbench_seed_strategy(body: SeedStrategyRequest) -> WorkbenchStrategy:
+        """播种一条新策略 — 从组合层变体 (signal_definition) 创建并行走模拟盘.
+
+        多策略并行入口: 每个变体有独立的状态机 + 运行目录 + 复盘基准.
+        """
+        import hashlib
+
+        from src.strategy.variant_backtester import parse_signal_definition
+
+        spec = parse_signal_definition(body.signal_definition)
+        if spec is None:
+            raise HTTPException(status_code=400, detail="signal_definition 无法解析")
+        factors: list[str] = list(spec["factors"])
+        weights: dict[str, float] = {k: float(v) for k, v in spec["weights"].items()}
+        top_n: int = int(spec["top_n"])
+        bot_n: int = int(spec["bot_n"])
+        strategy_id = "combo_" + hashlib.md5(body.signal_definition.encode()).hexdigest()[:8]
+
+        with _lock:
+            strategies = _read_strategies()
+            if any(s.get("strategy_id") == strategy_id for s in strategies):
+                raise HTTPException(status_code=409, detail=f"策略已存在: {strategy_id}")
+            run_dir = Path.home() / ".vibe-trading" / "runs" / f"paper_{strategy_id}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            state_path = run_dir / "state.json"
+            if not state_path.exists():
+                state_path.write_text(
+                    json.dumps(
+                        {
+                            "started_at": None,
+                            "nav": 1.0,
+                            "last_signal_date": None,
+                            "last_longs": [],
+                            "last_shorts": [],
+                            "trades": [],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            name = body.name or f"变体策略 ({strategy_id})"
+            strategy = {
+                "strategy_id": strategy_id,
+                "name": name,
+                "description": body.description or f"组合变体 · 因子 {', '.join(factors)} · 多 top{top_n} 空 bottom{bot_n}",
+                "factors": list(factors),
+                "weights": {k: round(float(v), 4) for k, v in weights.items()},
+                "top_n": top_n,
+                "bot_n": bot_n,
+                "universe_size": 10,
+                "rebalance": "日频 · 每日 07:00",
+                "signal_definition": body.signal_definition,
+                "run_dir": str(run_dir),
+                "phase": "research",
+                "params": {"exposure_multiplier": 1.0},
+                "adaptation_history": [],
+                "phase_history": [
+                    {
+                        "phase": "research",
+                        "at": _now_iso(),
+                        "action": "seeded",
+                        "note": "从组合层变体播种",
+                    }
+                ],
+                "updated_at": _now_iso(),
+            }
+            strategies.append(strategy)
+            _write_strategies(strategies)
+        return WorkbenchStrategy(**strategy)
