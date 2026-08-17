@@ -123,9 +123,10 @@ class WorkbenchStrategy(BaseModel):
     adaptation_history: list[dict[str, Any]] = Field(default_factory=list)
     phase_history: list[WorkbenchPhaseEvent] = Field(default_factory=list)
     updated_at: Optional[str] = None
-    #: 运行时数据 (GET 聚合时填充): 模拟盘摘要 + 复盘输出
+    #: 运行时数据 (GET 聚合时填充): 模拟盘摘要 + 复盘输出 + 该策略自己的回测指标
     paper: dict[str, Any] = Field(default_factory=dict)
     review: dict[str, Any] = Field(default_factory=dict)
+    strategy_backtest: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkbenchResponse(BaseModel):
@@ -477,6 +478,9 @@ def register_workbench_routes(
                 if sd in backtest_cache:
                     m = backtest_cache[sd]
                     baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
+                    s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
+                else:
+                    s["strategy_backtest"] = {}
                 try:
                     r = compute_review(
                         run_dir / "state.json",
