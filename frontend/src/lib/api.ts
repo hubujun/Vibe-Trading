@@ -1898,6 +1898,7 @@ export interface WorkbenchResponse {
     active: AutopilotFactorInfo[];
     pending: string[];
     retired: AutopilotRetiredFactor[];
+    zoo: Array<{ alpha_id: string; nickname: string; theme: string[] }>;
     zoo_count: number;
     updated_at: string | null;
   } | null;
