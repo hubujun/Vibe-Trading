@@ -267,14 +267,16 @@ export function Workbench() {
   const testingCount = hypotheses.filter(h => h.status === "testing").length;
 
   // 挖掘层候选: zoo 因子 − 活跃 − 退役 (退役 alpha_id 带 crypto_mined_ 前缀, 归一化比较)
+  const normFactorId = (s: string) => s.replace(/^crypto_mined_/, "");
   const minedCandidates = (data?.autopilot_factors?.zoo ?? []).filter(z => {
-    const norm = (s: string) => s.replace(/^crypto_mined_/, "");
     const retired = data?.autopilot_factors?.retired ?? [];
     return (
-      !(data?.autopilot_factors?.active ?? []).some(a => norm(a.alpha_id) === norm(z.alpha_id)) &&
-      !retired.some(r => norm(r.alpha_id) === norm(z.alpha_id))
+      !(data?.autopilot_factors?.active ?? []).some(a => normFactorId(a.alpha_id) === normFactorId(z.alpha_id)) &&
+      !retired.some(r => normFactorId(r.alpha_id) === normFactorId(z.alpha_id))
     );
   });
+  // 退役唯一因子数 (记录可能重复: 同一因子被三关多次拒绝)
+  const retiredUniqueCount = new Set((data?.autopilot_factors?.retired ?? []).map(r => normFactorId(r.alpha_id))).size;
 
   // 流水线节点状态: 挖掘/组合为数据驱动, 研究~复盘由策略阶段决定
   const nodeStatus = (p: string, i: number): "passed" | "current" | "pending" => {
@@ -292,7 +294,7 @@ export function Workbench() {
       { label: "zoo 因子", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
       { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
       { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
-      { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
+      { label: "退役（唯一因子）", value: `${retiredUniqueCount}`, color: "text-muted-foreground" },
     ],
     compose: [
       { label: "变体候选", value: `${variantCount}`, color: "text-purple-400" },
@@ -709,7 +711,7 @@ export function Workbench() {
                     { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
                     { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
                     { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
-                    { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
+                    { label: "退役（唯一因子）", value: `${retiredUniqueCount}`, color: "text-muted-foreground" },
                   ].map(k => (
                     <div key={k.label} className="rounded-lg border border-border/60 p-3">
                       <div className="text-[11px] text-muted-foreground">{k.label}</div>
@@ -784,7 +786,9 @@ export function Workbench() {
                 ) : null}
                 {data?.autopilot_factors?.retired?.length ? (
                   <>
-                    <div className="text-xs text-muted-foreground mt-4 mb-2">已退役因子</div>
+                    <div className="text-xs text-muted-foreground mt-4 mb-2">
+                      已退役因子（{data?.autopilot_factors?.retired?.length ?? 0} 条记录 · {retiredUniqueCount} 个唯一因子）
+                    </div>
                     <div className="overflow-x-auto max-h-[240px] overflow-y-auto">
                       <table className="w-full text-sm">
                         <thead>
