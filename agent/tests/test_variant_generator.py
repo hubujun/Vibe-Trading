@@ -102,12 +102,28 @@ class TestVariantContent:
         assert any("top_n=2" in d for d in defs)
         assert any("top_n=4" in d for d in defs)
 
+    def test_factor_level_variants_from_zoo(self, tmp_path: Path) -> None:
+        """zoo 里实际存在的挖掘因子进入因子级变体 (挖掘→组合通路)."""
+        registry = _seed_registry(tmp_path / "h.json", "validated")
+
+        created = generate_variants(registry, max_new=20)
+
+        factor_defs = [c["signal_definition"] for c in created if "factors=[" in c["signal_definition"]]
+        # crypto_mined zoo 存在 volume_surge_reversal 等因子 (真实验证)
+        assert factor_defs, "zoo 存在挖掘因子时应生成因子级变体"
+        assert any("factors=[BAB,high52w,volume_surge_reversal]" in d for d in factor_defs)
+
     def test_signal_definition_roundtrip(self) -> None:
         d = variant_signal_definition({"weights": {"BAB": 0.7, "high52w": 0.3}, "top_n": 2})
         assert d == "combo_variant: weights={BAB:0.7,high52w:0.3} top_n=2 bot_n=3"
         # 空变体 = 基策略定义
         base = variant_signal_definition({})
         assert base == "combo_variant: weights={BAB:0.5,high52w:0.5} top_n=3 bot_n=3"
+        # 因子级变体含 factors 列表
+        fd = variant_signal_definition(
+            {"factors": ["BAB", "high52w", "vol_x"], "weights": {"BAB": 1 / 3, "high52w": 1 / 3, "vol_x": 1 / 3}}
+        )
+        assert fd.startswith("combo_variant: factors=[BAB,high52w,vol_x]")
 
 
 class TestDedup:
