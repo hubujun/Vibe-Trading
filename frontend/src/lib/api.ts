@@ -574,6 +574,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, note }),
     }),
+  seedStrategy: (signalDefinition: string, name?: string) =>
+    request<WorkbenchStrategy>("/api/workbench/strategies", {
+      method: "POST",
+      body: JSON.stringify({ signal_definition: signalDefinition, name }),
+    }),
   getOptionsSurface: (ticker: string, signal?: AbortSignal) =>
     request<OptionsSurface>(
       `/api/options-lab/surface?ticker=${encodeURIComponent(ticker)}`,
@@ -1845,6 +1850,7 @@ export interface ComboHypothesis {
   title: string;
   status: string;
   thesis: string;
+  signal_definition?: string;
 }
 
 export interface ComboSummary {
@@ -1870,8 +1876,12 @@ export interface WorkbenchStrategy {
   description: string;
   factors: string[];
   weights: Record<string, number>;
+  top_n: number;
+  bot_n: number;
   universe_size: number;
   rebalance: string;
+  signal_definition: string;
+  run_dir: string;
   phase: string; // research | paper | live | paused
   paused_from?: string | null;
   params?: Record<string, number>;
@@ -1884,6 +1894,17 @@ export interface WorkbenchStrategy {
   }>;
   phase_history: WorkbenchPhaseEvent[];
   updated_at?: string | null;
+  /** 运行时数据 (GET 聚合填充): 模拟盘摘要 + 复盘输出 */
+  paper?: {
+    nav?: number;
+    started_at?: string | null;
+    last_signal_date?: string | null;
+    longs?: string[];
+    shorts?: string[];
+    scores?: Record<string, number>;
+    trades?: Array<{ from: string; to: string; ret: number; exposure_multiplier: number }>;
+  };
+  review?: Partial<WorkbenchReview>;
 }
 
 /** Aggregated pipeline view: strategies + combo research + autopilot execution. */
