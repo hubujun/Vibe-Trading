@@ -500,6 +500,70 @@ def load_factors_for_dashboard() -> dict[str, Any] | None:
         return None
 
 
+def load_factor_stats_for_dashboard() -> dict[str, Any] | None:
+    """按 alpha_id 从 trade ledger 聚合因子实绩: 交易数/胜率/PF/Sharpe/PnL.
+
+    每个因子一条: trades/wins/losses/win_rate/profit_factor/sharpe/realized_pnl.
+    Profit Factor 无亏损时返回 None (前端显示 ∞).
+    """
+    try:
+        import numpy as np
+
+        from src.crypto_autopilot.trade_ledger import read_trade_records
+
+        records = read_trade_records(_RUNTIME_ROOT, limit=10_000)
+        stats: dict[str, dict[str, Any]] = {}
+        daily: dict[str, dict[str, float]] = {}
+        for rec in records:
+            aid = rec.get("alpha_id")
+            if not aid:
+                continue
+            pnl = rec.get("realized_pnl")
+            if pnl is None:
+                continue
+            s = stats.setdefault(
+                aid,
+                {"trades": 0, "wins": 0, "losses": 0, "win_pnl": 0.0, "loss_pnl": 0.0},
+            )
+            s["trades"] += 1
+            if pnl > 0:
+                s["wins"] += 1
+                s["win_pnl"] += float(pnl)
+            elif pnl < 0:
+                s["losses"] += 1
+                s["loss_pnl"] += abs(float(pnl))
+            day = str(rec.get("ts", ""))[:10]
+            daily.setdefault(aid, {}).setdefault(day, 0.0)
+            daily[aid][day] += float(pnl)
+
+        out: dict[str, dict[str, Any]] = {}
+        for aid, s in stats.items():
+            closed = s["wins"] + s["losses"]
+            if s["loss_pnl"] > 0:
+                pf = round(s["win_pnl"] / s["loss_pnl"], 2)
+            elif s["win_pnl"] > 0:
+                pf = None  # 无亏损 → 前端显示 ∞
+            else:
+                pf = 0.0
+            vals = np.array(list(daily[aid].values()), dtype=np.float64)
+            std = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
+            sharpe = (
+                round(float(np.mean(vals)) / std * np.sqrt(365), 2) if std > 0 else 0.0
+            )
+            out[aid] = {
+                "trades": s["trades"],
+                "wins": s["wins"],
+                "losses": s["losses"],
+                "win_rate": round(s["wins"] / closed, 4) if closed else 0.0,
+                "profit_factor": pf,
+                "sharpe": sharpe,
+                "realized_pnl": round(s["win_pnl"] - s["loss_pnl"], 2),
+            }
+        return out
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def register_autopilot_routes(
     app: FastAPI,
     require_auth: AuthDep | None = None,

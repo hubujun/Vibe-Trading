@@ -1553,6 +1553,18 @@ export interface WorkbenchResponse {
     zoo_count: number;
     updated_at: string | null;
   } | null;
+  autopilot_factor_stats: Record<
+    string,
+    {
+      trades: number;
+      wins: number;
+      losses: number;
+      win_rate: number;
+      profit_factor: number | null;
+      sharpe: number;
+      realized_pnl: number;
+    }
+  >;
   review: WorkbenchReview;
   updated_at?: string | null;
 }
