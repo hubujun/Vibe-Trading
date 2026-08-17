@@ -1557,6 +1557,8 @@ export interface WorkbenchStrategy {
     trades?: Array<{ from: string; to: string; ret: number; exposure_multiplier: number }>;
   };
   review?: Partial<WorkbenchReview>;
+  /** 该策略自己的回测指标 (来自变体自动回测缓存) */
+  strategy_backtest?: { annual?: number | null; sharpe?: number | null; max_dd?: number | null; cum?: number | null };
 }
 
 /** Aggregated pipeline view: strategies + combo research + autopilot execution. */

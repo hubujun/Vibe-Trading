@@ -303,10 +303,11 @@ export function Workbench() {
       { label: "自动回测", value: "每日 08:45" },
     ],
     research: [
-      { label: "回测年化", value: combo2 ? fmtPct(combo2.annual) : "--", color: "text-emerald-400" },
-      { label: "回测夏普", value: combo2 ? combo2.sharpe.toFixed(2) : "--" },
-      { label: "最大回撤", value: combo2 ? fmtPct(combo2.max_dd) : "--", color: "text-rose-400" },
-      { label: "累计收益", value: combo2 ? fmtPct(combo2.cum) : "--", color: "text-emerald-400" },
+      // 选中策略自己的回测指标 (播种策略来自变体回测缓存, 基策略回退 COMBO2)
+      { label: "回测年化", value: (strategy?.strategy_backtest?.annual ?? combo2?.annual) != null ? fmtPct(strategy?.strategy_backtest?.annual ?? combo2?.annual) : "--", color: "text-emerald-400" },
+      { label: "回测夏普", value: (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe) != null ? (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe!).toFixed(2) : "--" },
+      { label: "最大回撤", value: (strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) != null ? fmtPct(strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) : "--", color: "text-rose-400" },
+      { label: "累计收益", value: (strategy?.strategy_backtest?.cum ?? combo2?.cum) != null ? fmtPct(strategy?.strategy_backtest?.cum ?? combo2?.cum) : "--", color: "text-emerald-400" },
     ],
     paper: [
       { label: "模拟盘净值", value: paper?.nav != null ? paper.nav.toFixed(4) : "--", color: "text-emerald-400" },
