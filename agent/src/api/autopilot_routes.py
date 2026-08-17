@@ -160,13 +160,26 @@ class AutopilotRetiredFactor(BaseModel):
     reason: Optional[str] = None
 
 
+class AutopilotZooFactor(BaseModel):
+    """One mined factor in the zoo inventory with its metadata.
+
+    ``meta`` mirrors the factor's ``__alpha_meta__`` (nickname, theme,
+    formula_latex, universe, frequency, decay_horizon, min_warmup_bars,
+    notes). It is ``None`` when the metadata could not be parsed.
+    """
+
+    alpha_id: str
+    meta: Optional[dict[str, Any]] = None
+    meta_ok: bool = False
+
+
 class AutopilotFactorListResponse(BaseModel):
     """Active/pending/retired factors plus the full zoo inventory."""
 
     active: list[AutopilotFactorInfo] = []
     pending: list[str] = []
     retired: list[AutopilotRetiredFactor] = []
-    zoo: list[str] = []
+    zoo: list[AutopilotZooFactor] = []
     updated_at: Optional[str] = None
 
 
@@ -431,7 +444,7 @@ def register_autopilot_routes(
             )
         except (OSError, ValueError, TypeError):
             pass
-        zoo = FactorStore().list_factors()
+        zoo = FactorStore().list_factors_with_meta()
         return AutopilotFactorListResponse(
             active=[
                 AutopilotFactorInfo(**f) for f in payload.get("active", [])
@@ -440,7 +453,7 @@ def register_autopilot_routes(
             retired=[
                 AutopilotRetiredFactor(**f) for f in payload.get("retired", [])
             ],
-            zoo=zoo,
+            zoo=[AutopilotZooFactor(**entry) for entry in zoo],
             updated_at=payload.get("updated_at"),
         )
 
