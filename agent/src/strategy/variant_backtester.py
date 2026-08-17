@@ -227,7 +227,10 @@ def backtest_variant(
     weight_sum = 0.0
     for fid, mod in valid.items():
         try:
-            f = _row_zscore(mod.compute(panel).reindex(close.index))
+            f = mod.compute(panel).reindex(close.index)
+            # 学术因子 compute 已返回横截面 z-score; zoo 因子 raw → 行 z-score 统一
+            if fid not in ACADEMIC_MODULES:
+                f = _row_zscore(f)
         except Exception:  # noqa: BLE001
             continue
         w = float(weights.get(fid, 0.0))
