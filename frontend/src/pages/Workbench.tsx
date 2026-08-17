@@ -266,6 +266,16 @@ export function Workbench() {
   const backtestedCount = Object.keys(review?.variant_metrics ?? {}).length;
   const testingCount = hypotheses.filter(h => h.status === "testing").length;
 
+  // 挖掘层候选: zoo 因子 − 活跃 − 退役 (退役 alpha_id 带 crypto_mined_ 前缀, 归一化比较)
+  const minedCandidates = (data?.autopilot_factors?.zoo ?? []).filter(z => {
+    const norm = (s: string) => s.replace(/^crypto_mined_/, "");
+    const retired = data?.autopilot_factors?.retired ?? [];
+    return (
+      !(data?.autopilot_factors?.active ?? []).some(a => norm(a.alpha_id) === norm(z.alpha_id)) &&
+      !retired.some(r => norm(r.alpha_id) === norm(z.alpha_id))
+    );
+  });
+
   // 流水线节点状态: 挖掘/组合为数据驱动, 研究~复盘由策略阶段决定
   const nodeStatus = (p: string, i: number): "passed" | "current" | "pending" => {
     if (p === "mine") return (data?.autopilot_factors?.zoo_count ?? 0) > 0 ? "passed" : "pending";
@@ -281,7 +291,7 @@ export function Workbench() {
     mine: [
       { label: "zoo 因子", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
       { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
-      { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
+      { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
       { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
     ],
     compose: [
@@ -698,7 +708,7 @@ export function Workbench() {
                   {[
                     { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
                     { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
-                    { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
+                    { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
                     { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
                   ].map(k => (
                     <div key={k.label} className="rounded-lg border border-border/60 p-3">
@@ -756,19 +766,19 @@ export function Workbench() {
                     {data?.autopilot_factors ? "暂无活跃挖掘因子（zoo 因子待过三关准入）" : "挖掘数据不可用（Autopilot 未启动）"}
                   </div>
                 )}
-                {data?.autopilot_factors?.zoo?.length ? (
+                {minedCandidates.length ? (
                   <>
                     <div className="text-xs text-muted-foreground mt-4 mb-2">zoo 候选（未激活未退役）</div>
                     <div className="flex flex-wrap gap-2">
-                      {data.autopilot_factors.zoo
-                        .filter(z => !data.autopilot_factors!.active.some(a => a.alpha_id === z.alpha_id) && !data.autopilot_factors!.retired.some(r => r.alpha_id === z.alpha_id))
-                        .slice(0, 24)
-                        .map(z => (
-                          <span key={z.alpha_id} className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
-                            {z.alpha_id.replace("crypto_mined_", "")}
-                            {z.nickname && <span className="ml-1 text-muted-foreground/60">{z.nickname}</span>}
-                          </span>
-                        ))}
+                      {minedCandidates.slice(0, 24).map(z => (
+                        <span key={z.alpha_id} className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
+                          {z.alpha_id.replace("crypto_mined_", "")}
+                          {z.nickname && <span className="ml-1 text-muted-foreground/60">{z.nickname}</span>}
+                        </span>
+                      ))}
+                      {minedCandidates.length > 24 && (
+                        <span className="text-[11px] text-muted-foreground">+{minedCandidates.length - 24} 个…</span>
+                      )}
                     </div>
                   </>
                 ) : null}
