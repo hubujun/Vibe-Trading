@@ -93,16 +93,40 @@ def _zoo_factor_ids() -> set[str]:
         return set()
 
 
+def _retired_factor_ids() -> set[str]:
+    """autopilot 已退役 (过拟合三关拒绝) 的因子 id 集合.
+
+    退役记录的 alpha_id 带 ``crypto_mined_`` 前缀, 与 zoo 文件名对齐后比较.
+    """
+    import json
+    from pathlib import Path
+
+    try:
+        raw = json.loads(
+            (Path.home() / ".vibe-trading" / "runs" / "autopilot" / "factors.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        retired = {
+            str(r.get("alpha_id", "")).removeprefix("crypto_mined_")
+            for r in raw.get("retired", [])
+        }
+        return {r for r in retired if r}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
 def _factor_level_variants() -> list[dict[str, Any]]:
     """从 zoo 挖掘因子生成因子级变体 (三因子: BAB + high52w + X).
 
-    仅包含 zoo 实际存在的因子 — 挖掘引擎产出新因子后, 这里自动出现新候选,
-    形成 挖掘 → 组合 的通路.
+    仅包含 zoo 实际存在且未退役 (未被过拟合三关刷掉) 的因子 —
+    挖掘引擎产出新因子后, 这里自动出现新候选, 形成 挖掘 → 组合 的通路.
     """
     zoo_ids = _zoo_factor_ids()
+    retired_ids = _retired_factor_ids()
     variants: list[dict[str, Any]] = []
     for fid in FACTOR_POOL:
-        if fid in zoo_ids:
+        if fid in zoo_ids and fid not in retired_ids:
             variants.append(
                 {
                     "name": f"加入挖掘因子 {fid}",
