@@ -223,19 +223,22 @@ def _annualized(nav: float, days: float) -> float | None:
 
 def compute_review(
     combo_state_path: Path,
-    metrics_path: Path,
+    metrics_path: Path | None = None,
     hypotheses_path: Path | None = None,
+    baseline: dict[str, Any] | None = None,
 ) -> StrategyReview:
     """对 combo 策略跑一轮复盘, 返回体检 + 假设流转 + 推荐动作.
 
     Args:
         combo_state_path: paper_combo/state.json
-        metrics_path: paper_combo/backtest_metrics.json
+        metrics_path: paper_combo/backtest_metrics.json (None → 只用 baseline)
         hypotheses_path: hypotheses.json (None → 跳过假设流转)
+        baseline: 该策略自己的回测基准 (annual/max_dd), 覆盖 metrics 里的
+            COMBO2 默认值 — 多策略并行时每策略用自己的回测指标体检.
     """
     review = StrategyReview()
     state = _read_json(combo_state_path)
-    metrics = _read_json(metrics_path)
+    metrics = _read_json(metrics_path) if metrics_path is not None else {}
     today = datetime.now(timezone.utc)
 
     # --- vs 回测体检 ---
@@ -243,7 +246,9 @@ def compute_review(
     nav = state.get("nav")
     started_at = state.get("started_at")
     bt = metrics.get("backtest", {}) or {}
-    combo2 = bt.get("COMBO2(BAB+52w)", {}) or {}
+    combo2 = dict(bt.get("COMBO2(BAB+52w)", {}) or {})
+    if baseline:
+        combo2.update({k: v for k, v in baseline.items() if v is not None})
 
     vs = review.vs_backtest
     vs.paper_trades = len(trades)
