@@ -1965,6 +1965,10 @@ export interface WorkbenchReview {
   hypothesis_updates: WorkbenchReviewHypothesisUpdate[];
   adaptations: WorkbenchReviewAdaptation[];
   variants: WorkbenchReviewVariant[];
+  variant_metrics: Record<
+    string,
+    { annual: number | null; sharpe: number | null; max_dd: number | null; cum: number | null; backtested_at: string | null }
+  >;
   recommendations: WorkbenchReviewRecommendation[];
   reviewed_at: string;
 }
