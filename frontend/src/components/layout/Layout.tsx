@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router";
-import { Activity, BarChart3, Bot, CalendarClock, Check, ChevronDown, FileText, Languages, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, WalletCards, Cpu, Sigma, Scale, Gauge } from "lucide-react";
+import { Activity, BarChart3, Bot, CalendarClock, Check, ChevronDown, FileText, Languages, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, WalletCards, Cpu, Sigma, Scale, Gauge, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -23,6 +23,7 @@ export function Layout() {
     { to: "/", icon: Bot, label: t('layout.agent') },
     { to: "/runtime", icon: Activity, label: t('layout.runtime') },
     { to: "/autopilot", icon: Cpu, label: t('layout.autopilot') },
+    { to: "/workbench", icon: Workflow, label: "策略流水线" },
     { to: "/scheduled", icon: CalendarClock, label: t('layout.scheduled') },
     { to: "/reports", icon: FileText, label: t('layout.reports') },
     { to: "/portfolio", icon: WalletCards, label: t('layout.portfolio') },

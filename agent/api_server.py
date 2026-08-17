@@ -279,6 +279,10 @@ register_autopilot_routes(app)
 from src.api.combo_routes import register_combo_routes  # noqa: E402
 register_combo_routes(app)
 
+# --- Strategy lifecycle workbench (方案C: 组合 Combo + Autopilot 的流水线视图) ---
+from src.api.workbench_routes import register_workbench_routes  # noqa: E402
+register_workbench_routes(app)
+
 # --- Options Lab (vol surface + Greeks) ---
 from src.api.options_lab_routes import register_options_lab_routes  # noqa: E402
 register_options_lab_routes(app)
