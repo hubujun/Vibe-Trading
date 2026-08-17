@@ -123,7 +123,9 @@ class PaperEngine:
     # Order placement
     # ------------------------------------------------------------------
 
-    def place_order(self, symbol: str, side: str, notional: float) -> dict[str, Any]:
+    def place_order(
+        self, symbol: str, side: str, notional: float, alpha_id: str | None = None,
+    ) -> dict[str, Any]:
         """Place a market order on the OKX demo account.
 
         Enforces the per-order notional cap from
@@ -135,6 +137,9 @@ class PaperEngine:
             symbol: Instrument id, e.g. ``"BTC-USDT"``.
             side: ``"buy"`` or ``"sell"``.
             notional: Quote-currency amount (USD) to trade.
+            alpha_id: Triggering factor id — persisted on the ledger fill
+                so factor-level performance (win rate / PF / Sharpe) can be
+                aggregated per factor.
 
         Returns:
             The SDK order-result dict (``{"status": "ok", ...}`` or
@@ -193,7 +198,7 @@ class PaperEngine:
             # Local simulated fills: no broker round-trip, no API key. The
             # position book and trade ledger still update exactly like a
             # real demo fill so the full pipeline can be exercised end-to-end.
-            return self._place_simulated(clean_symbol, clean_side, notional)
+            return self._place_simulated(clean_symbol, clean_side, notional, alpha_id=alpha_id)
 
         # Snapshot the signal price before the round-trip so slippage can be
         # measured against the actual fill price (best-effort).
@@ -209,6 +214,7 @@ class PaperEngine:
         if result.get("status") == "ok":
             self._record_fill(
                 clean_symbol, clean_side, notional, signal_price=signal_price,
+                alpha_id=alpha_id,
             )
         else:
             logger.warning(
@@ -219,7 +225,9 @@ class PaperEngine:
             )
         return result
 
-    def _place_simulated(self, symbol: str, side: str, notional: float) -> dict[str, Any]:
+    def _place_simulated(
+        self, symbol: str, side: str, notional: float, alpha_id: str | None = None,
+    ) -> dict[str, Any]:
         """Fill an order locally against the live market price.
 
         Used when ``config.paper_simulated`` is set (``AUTOPILOT_PAPER_SIMULATED=1``):
@@ -248,7 +256,7 @@ class PaperEngine:
                 "side": side,
                 "simulated": True,
             }
-        self._record_fill(symbol, side, notional, signal_price=price)
+        self._record_fill(symbol, side, notional, signal_price=price, alpha_id=alpha_id)
         logger.info(
             "simulated fill %s %s notional=%.2f @ %.4f",
             side, symbol, notional, price,
@@ -466,12 +474,19 @@ class PaperEngine:
                 "side": "sell",
             }
         notional = total_qty * current_price
+        # 平仓记录继承开仓时的因子标注 (因子实绩聚合用)
+        alpha_id = None
+        for f in fills:
+            if f.get("alpha_id"):
+                alpha_id = f["alpha_id"]
+                break
 
         if self.config.paper_simulated:
             # Local close: record the sell fill and let the position book
             # settle realized P&L exactly like a broker fill (net of fees).
             realized = self._record_fill(
                 symbol, "sell", notional, signal_price=current_price,
+                alpha_id=alpha_id,
             )
             logger.info(
                 "simulated close %s: qty=%.6f realized=%.2f",
@@ -508,6 +523,7 @@ class PaperEngine:
                     "notional": notional,
                     "realized_pnl": realized,
                     "fee": fee,
+                    "alpha_id": alpha_id,
                 }
             )
             self._positions[symbol] = []
@@ -519,6 +535,7 @@ class PaperEngine:
                 notional=notional,
                 realized_pnl=realized,
                 fee=fee,
+                alpha_id=alpha_id,
             )
             logger.info(
                 "closed %s: qty=%.6f realized=%.2f",
@@ -555,7 +572,12 @@ class PaperEngine:
     # ------------------------------------------------------------------
 
     def _record_fill(
-        self, symbol: str, side: str, notional: float, signal_price: float | None = None,
+        self,
+        symbol: str,
+        side: str,
+        notional: float,
+        signal_price: float | None = None,
+        alpha_id: str | None = None,
     ) -> float | None:
         """Update the local position book after a successful fill.
 
@@ -571,6 +593,8 @@ class PaperEngine:
             signal_price: Price the strategy observed when it decided to
                 trade; used to measure slippage against the fill price
                 (best-effort, ``None`` skips the measurement).
+            alpha_id: Triggering factor id, persisted to the ledger and
+                carried on the position fill for later aggregation.
 
         Returns:
             Realized P&L (net of fees) when the fill closed a position,
@@ -588,6 +612,7 @@ class PaperEngine:
         now = datetime.now(timezone.utc)
         realized = self._apply_fill(
             symbol, side, price, quantity, now, tally_realized=True, fee=fee,
+            alpha_id=alpha_id,
         )
         self._write_ledger(
             symbol=symbol,
@@ -597,6 +622,7 @@ class PaperEngine:
             notional=notional,
             realized_pnl=realized,
             fee=fee,
+            alpha_id=alpha_id,
         )
         # Measure signal-vs-fill spread when a signal price is available and
         # actually differs from the fill price (identical prices mean zero
@@ -633,6 +659,7 @@ class PaperEngine:
         *,
         tally_realized: bool,
         fee: float = 0.0,
+        alpha_id: str | None = None,
     ) -> float | None:
         """Apply one fill to the position book and trade log (no I/O).
 
@@ -667,6 +694,7 @@ class PaperEngine:
                 "price": price,
                 "notional": price * quantity,
                 "fee": fee,
+                "alpha_id": alpha_id,
             }
         )
 
@@ -680,6 +708,7 @@ class PaperEngine:
                     "entry_price": price,
                     "entry_time": now,
                     "fee": fee,
+                    "alpha_id": alpha_id,
                 }
             )
         elif side == "sell":
@@ -720,6 +749,7 @@ class PaperEngine:
         notional: float,
         realized_pnl: float | None,
         fee: float = 0.0,
+        alpha_id: str | None = None,
     ) -> None:
         """Append one paper fill to the trade ledger (best-effort)."""
         write_trade_record(
@@ -732,6 +762,7 @@ class PaperEngine:
             price=price,
             realized_pnl=realized_pnl,
             fee=fee,
+            alpha_id=alpha_id,
         )
 
     def _restore_from_ledger(self) -> None:
@@ -768,6 +799,7 @@ class PaperEngine:
                 ts,
                 tally_realized=False,
                 fee=float(record.get("fee", 0.0) or 0.0),
+                alpha_id=record.get("alpha_id"),
             )
             if realized is not None and ts.strftime("%Y-%m-%d") == today:
                 self._realized_today += realized

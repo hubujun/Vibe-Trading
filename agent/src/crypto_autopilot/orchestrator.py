@@ -703,6 +703,7 @@ class AutopilotOrchestrator:
                             symbol=self.config.pairs[0],
                             side="buy",
                             notional=notional,
+                            alpha_id=alpha_id,
                         )
                         if result.get("status") == "ok":
                             self._last_trade_ts = time.monotonic()

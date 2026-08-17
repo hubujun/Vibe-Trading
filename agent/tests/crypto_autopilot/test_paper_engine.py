@@ -2,7 +2,8 @@
 
 Covers PnL calculation (rolling Sharpe, max drawdown, daily PnL),
 position tracking (fill updates, get_positions, unrealized PnL),
-and order enforcement (notional cap rejection, valid order success).
+order enforcement (notional cap rejection, valid order success),
+and factor attribution (alpha_id flows through fills and the ledger).
 
 All OKX SDK calls are mocked — no real API requests are made.
 """
@@ -16,6 +17,7 @@ import pytest
 
 from src.crypto_autopilot.config import AutopilotConfig
 from src.crypto_autopilot.paper_engine import PaperEngine
+from src.crypto_autopilot.trade_ledger import read_trade_records
 from src.crypto_autopilot.types import PaperPosition
 
 __all__ = []
@@ -499,3 +501,52 @@ class TestPositionManagement:
         engine.place_order("ETH-USDT", "buy", 30.0)
 
         assert engine.open_exposure_usd() == pytest.approx(80.0)
+
+
+# ---------------------------------------------------------------------------
+# 4. Factor attribution (alpha_id 贯穿 fill → ledger → 平仓继承)
+# ---------------------------------------------------------------------------
+
+
+class TestFactorAttribution:
+    """Verify alpha_id flows from order placement into fills and the ledger."""
+
+    def test_alpha_id_flows_to_fill_and_ledger(
+        self, engine: PaperEngine, mock_place_order,
+    ) -> None:
+        engine._current_price = lambda _symbol: 100.0
+
+        engine.place_order("BTC-USDT", "buy", 50.0, alpha_id="alpha_test_01")
+
+        # 持仓 fill 带 alpha_id
+        assert engine._positions["BTC-USDT"][0]["alpha_id"] == "alpha_test_01"
+        # ledger 记录带 alpha_id
+        records = read_trade_records(engine._ledger_root, limit=10)
+        assert records[0]["alpha_id"] == "alpha_test_01"
+
+    def test_close_inherits_alpha_id_from_fill(
+        self, engine: PaperEngine, mock_place_order,
+    ) -> None:
+        engine._current_price = lambda _symbol: 100.0
+        engine.place_order("BTC-USDT", "buy", 50.0, alpha_id="alpha_test_01")
+        engine._current_price = lambda _symbol: 110.0
+
+        engine.close_position("BTC-USDT")
+
+        records = read_trade_records(engine._ledger_root, limit=10)
+        sell = next(r for r in records if r["side"] == "sell")
+        assert sell["alpha_id"] == "alpha_test_01"
+        assert sell["realized_pnl"] is not None
+
+    def test_close_without_alpha_id_stays_none(
+        self, engine: PaperEngine, mock_place_order,
+    ) -> None:
+        engine._current_price = lambda _symbol: 100.0
+        engine.place_order("BTC-USDT", "buy", 50.0)
+        engine._current_price = lambda _symbol: 110.0
+
+        engine.close_position("BTC-USDT")
+
+        records = read_trade_records(engine._ledger_root, limit=10)
+        sell = next(r for r in records if r["side"] == "sell")
+        assert sell["alpha_id"] is None
