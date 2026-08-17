@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Gauge,
   History,
+  Layers,
   Loader2,
   Pause,
   Play,
@@ -39,11 +40,25 @@ const PHASE_META: Record<
   string,
   { label: string; color: string; border: string; bg: string; icon: typeof Gauge }
 > = {
-  research: {
-    label: "研究",
+  mine: {
+    label: "挖掘",
     color: "text-amber-400",
     border: "border-amber-500/40",
     bg: "bg-amber-500/10",
+    icon: FlaskConical,
+  },
+  compose: {
+    label: "组合",
+    color: "text-purple-400",
+    border: "border-purple-500/40",
+    bg: "bg-purple-500/10",
+    icon: Layers,
+  },
+  research: {
+    label: "研究",
+    color: "text-cyan-400",
+    border: "border-cyan-500/40",
+    bg: "bg-cyan-500/10",
     icon: FlaskConical,
   },
   paper: {
@@ -76,7 +91,8 @@ const PHASE_META: Record<
   },
 };
 
-const PHASE_ORDER = ["research", "paper", "live", "review"];
+// 完整生命周期流水线: 挖掘 → 组合 → 研究 → 模拟 → 执行 → 复盘
+const PHASE_ORDER = ["mine", "compose", "research", "paper", "live", "review"];
 
 function fmtPct(v: number | undefined | null, signed = true): string {
   if (v == null || Number.isNaN(v)) return "--";
@@ -210,11 +226,38 @@ export function Workbench() {
   if (phase === "paused") actions.push({ action: "resume", label: "恢复", kind: "forward" });
   actions.push({ action: "back_to_research", label: "回到研究", kind: "ghost" });
 
-  const phaseIdx = PHASE_ORDER.indexOf(phase);
   const isPaused = phase === "paused";
   const effectivePhase = isPaused ? (strategy?.paused_from ?? "paper") : phase;
 
+  // 变体候选数 (exploring/testing 假设)
+  const variantCount = hypotheses.filter(h => h.status === "exploring" || h.status === "testing").length;
+  const backtestedCount = Object.keys(review?.variant_metrics ?? {}).length;
+  const testingCount = hypotheses.filter(h => h.status === "testing").length;
+
+  // 流水线节点状态: 挖掘/组合为数据驱动, 研究~复盘由策略阶段决定
+  const nodeStatus = (p: string, i: number): "passed" | "current" | "pending" => {
+    if (p === "mine") return (data?.autopilot_factors?.zoo_count ?? 0) > 0 ? "passed" : "pending";
+    if (p === "compose") return variantCount > 0 ? "passed" : "pending";
+    const strategyIdx = ["research", "paper", "live", "review"].indexOf(effectivePhase);
+    const nodeIdx = i - 2; // 研究=0, 模拟=1, 执行=2, 复盘=3
+    if (nodeIdx === strategyIdx) return "current";
+    if (nodeIdx < strategyIdx) return "passed";
+    return "pending";
+  };
+
   const stageStats: Record<string, { label: string; value: string; color?: string }[]> = {
+    mine: [
+      { label: "zoo 因子", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
+      { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
+      { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
+      { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
+    ],
+    compose: [
+      { label: "变体候选", value: `${variantCount}`, color: "text-purple-400" },
+      { label: "已自动回测", value: `${backtestedCount}`, color: "text-cyan-400" },
+      { label: "晋升 testing", value: `${testingCount}`, color: "text-amber-400" },
+      { label: "自动回测", value: "每日 08:45" },
+    ],
     research: [
       { label: "回测年化", value: combo2 ? fmtPct(combo2.annual) : "--", color: "text-emerald-400" },
       { label: "回测夏普", value: combo2 ? combo2.sharpe.toFixed(2) : "--" },
@@ -255,7 +298,7 @@ export function Workbench() {
             策略流水线工作台
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            研究 → 模拟 → 执行 → 复盘 · 一条策略的完整生命周期 · 每 30s 自动刷新
+            挖掘 → 组合 → 研究 → 模拟 → 执行 → 复盘 · 完整闭环 · 每 30s 自动刷新
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -319,8 +362,9 @@ export function Workbench() {
               {PHASE_ORDER.map((p, i) => {
                 const meta = PHASE_META[p];
                 const Icon = meta.icon;
-                const active = effectivePhase === p;
-                const passed = phaseIdx > i;
+                const st = nodeStatus(p, i);
+                const active = st === "current";
+                const passed = st === "passed";
                 return (
                   <div key={p} className={cn("flex items-center", i > 0 && "flex-1")}>
                     {i > 0 && (
@@ -337,7 +381,7 @@ export function Workbench() {
                       </div>
                       <span className={cn("text-xs font-medium", active ? meta.color : "text-muted-foreground")}>
                         {meta.label}
-                        {i === 3 && <ChevronRight className="inline h-3 w-3 ml-0.5" />}
+                        {i === 5 && <ChevronRight className="inline h-3 w-3 ml-0.5" />}
                       </span>
                     </div>
                   </div>
@@ -347,17 +391,20 @@ export function Workbench() {
           </div>
 
           {/* Stage cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            {PHASE_ORDER.map(p => {
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {PHASE_ORDER.map((p, i) => {
               const meta = PHASE_META[p];
               const stats = stageStats[p] ?? [];
-              const active = effectivePhase === p;
+              const st = nodeStatus(p, i);
+              const active = st === "current";
+              const passed = st === "passed";
               return (
-                <div key={p} className={cn("rounded-xl border bg-card p-4 transition-all", active ? cn(meta.border, "ring-1 ring-current/10") : "border-border")}>
+                <div key={p} className={cn("rounded-xl border bg-card p-4 transition-all", active ? cn(meta.border, "ring-1 ring-current/10") : passed ? "border-cyan-500/30" : "border-border")}>
                   <div className="flex items-center gap-2 mb-3">
-                    <meta.icon className={cn("h-4 w-4", active ? meta.color : "text-muted-foreground")} />
+                    <meta.icon className={cn("h-4 w-4", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
                     <h2 className="text-sm font-semibold">{meta.label}</h2>
                     {active && <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.bg, meta.color)}>当前</span>}
+                    {passed && p !== "review" && <span className="ml-auto rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-400">✓</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     {stats.map(s => (
