@@ -403,9 +403,41 @@ export function Autopilot() {
                       <p className="text-sm text-muted-foreground">{t("autopilot.none")}</p>
                     ) : (
                       <ul className="space-y-1.5">
-                        {factors.zoo.map((id) => (
-                          <li key={id} className="break-all font-mono text-sm">
-                            {id}
+                        {factors.zoo.map((z) => (
+                          <li key={z.alpha_id} className="text-sm">
+                            <details className="group">
+                              <summary className="cursor-pointer list-none break-all">
+                                <span className="font-mono">{z.alpha_id}</span>
+                                {z.meta?.nickname ? (
+                                  <span className="ml-1.5 text-xs text-muted-foreground">
+                                    {z.meta.nickname}
+                                  </span>
+                                ) : null}
+                                {z.meta?.theme?.length ? (
+                                  <span className="ml-1.5 text-[10px] text-muted-foreground/70">
+                                    {z.meta.theme.join("/")}
+                                  </span>
+                                ) : null}
+                              </summary>
+                              {z.meta ? (
+                                <div className="mt-1 space-y-1 border-l border-border/60 pl-2 text-[11px] text-muted-foreground">
+                                  {z.meta.formula_latex ? (
+                                    <div className="break-all font-mono">{z.meta.formula_latex}</div>
+                                  ) : null}
+                                  <div>
+                                    {z.meta.universe?.join(", ")}
+                                    {z.meta.frequency?.length ? ` · ${z.meta.frequency.join("/")}` : ""}
+                                    {typeof z.meta.decay_horizon === "number"
+                                      ? ` · decay ${z.meta.decay_horizon}`
+                                      : ""}
+                                    {typeof z.meta.min_warmup_bars === "number"
+                                      ? ` · warmup ${z.meta.min_warmup_bars}`
+                                      : ""}
+                                  </div>
+                                  {z.meta.notes ? <div className="break-words">{z.meta.notes}</div> : null}
+                                </div>
+                              ) : null}
+                            </details>
                           </li>
                         ))}
                       </ul>
