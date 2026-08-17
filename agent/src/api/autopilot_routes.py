@@ -493,6 +493,14 @@ def load_factors_for_dashboard() -> dict[str, Any] | None:
             "active": payload.get("active", []),
             "pending": [str(x) for x in payload.get("pending", [])],
             "retired": payload.get("retired", []),
+            "zoo": [
+                {
+                    "alpha_id": str(f.get("alpha_id", "")),
+                    "nickname": (f.get("meta") or {}).get("nickname") or "",
+                    "theme": (f.get("meta") or {}).get("theme") or [],
+                }
+                for f in zoo
+            ],
             "zoo_count": len(zoo),
             "updated_at": payload.get("updated_at"),
         }

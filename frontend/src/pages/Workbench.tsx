@@ -103,6 +103,7 @@ export function Workbench() {
   const [data, setData] = useState<WorkbenchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
+  const [tier, setTier] = useState<"academic" | "mined" | "combo">("academic");
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
@@ -565,106 +566,206 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* 因子挖掘 (Alpha Zoo) */}
+          {/* 因子分层: 学术层 / 挖掘层 / 组合层 */}
           <div className="rounded-xl border bg-card p-4">
-            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <FlaskConical className="h-4 w-4 text-amber-400" />
-              因子挖掘（Alpha Zoo）
-              <span className="text-xs font-normal text-muted-foreground">
-                Autopilot discovering 阶段 · factor miner + 过拟合三关准入
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <h2 className="text-sm font-semibold flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-amber-400" />
+                因子分层
+              </h2>
+              <div className="flex rounded-lg border border-border/60 overflow-hidden text-xs font-medium">
+                {[
+                  { id: "academic", label: `学术层 ${Object.keys(data?.combo.metrics.ic ?? {}).length || ""}` },
+                  { id: "mined", label: `挖掘层 ${data?.autopilot_factors?.zoo_count ?? ""}` },
+                  { id: "combo", label: `组合层 ${variantCount || ""}` },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTier(t.id as "academic" | "mined" | "combo")}
+                    className={cn(
+                      "px-3 py-1.5 transition",
+                      tier === t.id ? "bg-amber-500/15 text-amber-300" : "text-muted-foreground hover:bg-accent",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <span className="text-xs text-muted-foreground ml-auto">
+                学术(文献) → 挖掘(factor miner) → 组合(变体) · 下层供上层
               </span>
-            </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              {[
-                { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
-                { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
-                { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
-                { label: "已退役", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
-              ].map(k => (
-                <div key={k.label} className="rounded-lg border border-border/60 p-3">
-                  <div className="text-[11px] text-muted-foreground">{k.label}</div>
-                  <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
-                </div>
-              ))}
             </div>
-            {data?.autopilot_factors?.active?.length ? (
+
+            {/* 学术层: 文献因子 IC */}
+            {tier === "academic" && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-muted-foreground border-b">
                       <th className="text-left py-2 pr-3">因子</th>
-                      <th className="text-left py-2 px-2">生命周期</th>
-                      <th className="text-right py-2 px-2">交易数</th>
-                      <th className="text-right py-2 px-2">胜率</th>
-                      <th className="text-right py-2 px-2">Profit Factor</th>
-                      <th className="text-right py-2 px-2">Sharpe</th>
-                      <th className="text-right py-2 px-2">IC</th>
-                      <th className="text-right py-2 px-2">已实现 PnL</th>
+                      <th className="text-right py-2 px-2">IC均值</th>
+                      <th className="text-right py-2 px-2">IR</th>
+                      <th className="text-right py-2 px-2">IC+ 比率</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.autopilot_factors.active.map(f => {
-                      const s = data.autopilot_factor_stats?.[f.alpha_id];
-                      return (
-                        <tr key={f.alpha_id} className="border-b border-muted/50">
-                          <td className="py-2 pr-3 font-mono text-xs">{f.alpha_id}</td>
-                          <td className="py-2 px-2 text-xs text-muted-foreground">{f.lifecycle || "--"}</td>
-                          <td className="py-2 px-2 text-right font-mono text-xs">{s?.trades ?? 0}</td>
-                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.win_rate ?? 0) >= 0.5 ? "text-emerald-400" : "text-rose-400")}>
-                            {s ? `${(s.win_rate * 100).toFixed(1)}%` : "--"}
-                          </td>
-                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.profit_factor ?? 0) >= 1 ? "text-emerald-400" : "text-rose-400")}>
-                            {s ? (s.profit_factor == null ? "∞" : s.profit_factor.toFixed(2)) : "--"}
-                          </td>
-                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.sharpe ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                            {s ? s.sharpe.toFixed(2) : "--"}
-                          </td>
-                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.ic_mean ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                            {f.ic_mean != null ? `${f.ic_mean >= 0 ? "+" : ""}${f.ic_mean.toFixed(3)}` : "--"}
-                          </td>
-                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.realized_pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                            {s ? `${s.realized_pnl >= 0 ? "+" : ""}$${s.realized_pnl.toLocaleString()}` : "--"}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {icRows.map(([name, m]) => (
+                      <tr key={name} className="border-b border-muted/50">
+                        <td className="py-2 pr-3 font-medium">{name}</td>
+                        <td className={cn("text-right py-2 px-2 font-mono", m.ic_mean >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {m.ic_mean > 0 ? "+" : ""}{m.ic_mean.toFixed(4)}
+                        </td>
+                        <td className={cn("text-right py-2 px-2 font-mono", m.ir >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {m.ir > 0 ? "+" : ""}{m.ir.toFixed(3)}
+                        </td>
+                        <td className="text-right py-2 px-2 font-mono">{m.ic_pos.toFixed(1)}%</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-              </div>
-            ) : (
-              <div className="text-xs text-muted-foreground">
-                {data?.autopilot_factors ? "暂无活跃挖掘因子" : "挖掘数据不可用（Autopilot 未启动）"}
+                <div className="mt-2 text-xs text-muted-foreground">
+                  文献因子（Frazzini-Pedersen BAB / Fama-French RMW / George-Hwang 52周高点）· 回测期 800 天 · 组合基座
+                </div>
               </div>
             )}
-            {data?.autopilot_factors?.retired?.length ? (
+
+            {/* 挖掘层: factor miner 产出 */}
+            {tier === "mined" && (
               <>
-                <div className="text-xs text-muted-foreground mt-4 mb-2">已退役因子</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-xs text-muted-foreground border-b">
-                        <th className="text-left py-2 pr-3">因子</th>
-                        <th className="text-left py-2 px-2">退役时间</th>
-                        <th className="text-left py-2 px-2">原因</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.autopilot_factors.retired.map(f => (
-                        <tr key={f.alpha_id} className="border-b border-muted/50">
-                          <td className="py-2 pr-3 font-mono text-xs text-rose-400">{f.alpha_id}</td>
-                          <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{f.retired_at ? String(f.retired_at).slice(0, 16).replace("T", " ") : "--"}</td>
-                          <td className="py-2 px-2 text-xs text-muted-foreground">{f.reason || "--"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  {[
+                    { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
+                    { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
+                    { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
+                    { label: "退役（被三关拒绝）", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
+                  ].map(k => (
+                    <div key={k.label} className="rounded-lg border border-border/60 p-3">
+                      <div className="text-[11px] text-muted-foreground">{k.label}</div>
+                      <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
+                    </div>
+                  ))}
                 </div>
+                {data?.autopilot_factors?.active?.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-muted-foreground border-b">
+                          <th className="text-left py-2 pr-3">因子</th>
+                          <th className="text-left py-2 px-2">生命周期</th>
+                          <th className="text-right py-2 px-2">交易数</th>
+                          <th className="text-right py-2 px-2">胜率</th>
+                          <th className="text-right py-2 px-2">Profit Factor</th>
+                          <th className="text-right py-2 px-2">Sharpe</th>
+                          <th className="text-right py-2 px-2">IC</th>
+                          <th className="text-right py-2 px-2">已实现 PnL</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.autopilot_factors.active.map(f => {
+                          const s = data.autopilot_factor_stats?.[f.alpha_id];
+                          return (
+                            <tr key={f.alpha_id} className="border-b border-muted/50">
+                              <td className="py-2 pr-3 font-mono text-xs">{f.alpha_id}</td>
+                              <td className="py-2 px-2 text-xs text-muted-foreground">{f.lifecycle || "--"}</td>
+                              <td className="py-2 px-2 text-right font-mono text-xs">{s?.trades ?? 0}</td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.win_rate ?? 0) >= 0.5 ? "text-emerald-400" : "text-rose-400")}>
+                                {s ? `${(s.win_rate * 100).toFixed(1)}%` : "--"}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.profit_factor ?? 0) >= 1 ? "text-emerald-400" : "text-rose-400")}>
+                                {s ? (s.profit_factor == null ? "∞" : s.profit_factor.toFixed(2)) : "--"}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.sharpe ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {s ? s.sharpe.toFixed(2) : "--"}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.ic_mean ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {f.ic_mean != null ? `${f.ic_mean >= 0 ? "+" : ""}${f.ic_mean.toFixed(3)}` : "--"}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.realized_pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {s ? `${s.realized_pnl >= 0 ? "+" : ""}$${s.realized_pnl.toLocaleString()}` : "--"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">
+                    {data?.autopilot_factors ? "暂无活跃挖掘因子（zoo 因子待过三关准入）" : "挖掘数据不可用（Autopilot 未启动）"}
+                  </div>
+                )}
+                {data?.autopilot_factors?.zoo?.length ? (
+                  <>
+                    <div className="text-xs text-muted-foreground mt-4 mb-2">zoo 候选（未激活未退役）</div>
+                    <div className="flex flex-wrap gap-2">
+                      {data.autopilot_factors.zoo
+                        .filter(z => !data.autopilot_factors!.active.some(a => a.alpha_id === z.alpha_id) && !data.autopilot_factors!.retired.some(r => r.alpha_id === z.alpha_id))
+                        .slice(0, 24)
+                        .map(z => (
+                          <span key={z.alpha_id} className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
+                            {z.alpha_id.replace("crypto_mined_", "")}
+                            {z.nickname && <span className="ml-1 text-muted-foreground/60">{z.nickname}</span>}
+                          </span>
+                        ))}
+                    </div>
+                  </>
+                ) : null}
+                {data?.autopilot_factors?.retired?.length ? (
+                  <>
+                    <div className="text-xs text-muted-foreground mt-4 mb-2">已退役因子</div>
+                    <div className="overflow-x-auto max-h-[240px] overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-muted-foreground border-b">
+                            <th className="text-left py-2 pr-3">因子</th>
+                            <th className="text-left py-2 px-2">退役时间</th>
+                            <th className="text-left py-2 px-2">原因</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.autopilot_factors.retired.map(f => (
+                            <tr key={`${f.alpha_id}-${f.retired_at}`} className="border-b border-muted/50">
+                              <td className="py-2 pr-3 font-mono text-xs text-rose-400">{f.alpha_id}</td>
+                              <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{f.retired_at ? String(f.retired_at).slice(0, 16).replace("T", " ") : "--"}</td>
+                              <td className="py-2 px-2 text-xs text-muted-foreground">{f.reason || "--"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : null}
               </>
-            ) : null}
-            {data?.autopilot_factors && (
-              <div className="mt-3 text-xs text-muted-foreground">
-                {data.autopilot_factors.pending.length > 0 && `待评估: ${data.autopilot_factors.pending.join(", ")} · `}
-                zoo 共 {data.autopilot_factors.zoo_count} 个因子 · 因子级变体生成器会自动从 zoo 挑选新挖掘因子加入组合候选（研究 → 模拟 → 执行 → 复盘 的螺旋中新因子从这里进入）
+            )}
+
+            {/* 组合层: 变体候选 */}
+            {tier === "combo" && (
+              <div className="grid grid-cols-1 gap-2">
+                {hypotheses.filter(h => h.status === "exploring" || h.status === "testing").map(h => {
+                  const m = review?.variant_metrics?.[h.hypothesis_id];
+                  return (
+                    <div key={h.hypothesis_id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/50 px-3 py-2 text-xs">
+                      <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-semibold", h.status === "testing" ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground")}>
+                        {h.status}
+                      </span>
+                      <span className="font-medium">{h.title.replace("BAB+high52w 双因子组合 · ", "")}</span>
+                      {m && (
+                        <>
+                          <span className={cn("font-mono", (m.annual ?? 0) > 0 ? "text-emerald-400" : "text-rose-400")}>
+                            年化 {m.annual != null ? `${m.annual > 0 ? "+" : ""}${m.annual}%` : "--"}
+                          </span>
+                          <span className="font-mono text-muted-foreground">夏普 {m.sharpe ?? "--"}</span>
+                          <span className="font-mono text-rose-400">回撤 {m.max_dd ?? "--"}%</span>
+                        </>
+                      )}
+                      {h.status === "testing" && <span className="ml-auto text-amber-300">✅ 已晋升，可进模拟</span>}
+                    </div>
+                  );
+                })}
+                {!variantCount && <div className="text-xs text-muted-foreground">暂无变体候选 — 基策略 validated 后自动生成</div>}
+                <div className="mt-2 text-xs text-muted-foreground">
+                  变体来源：学术层 × 挖掘层 组合 · 每日 08:45 自动回测 · 跑赢基策略自动晋升 testing
+                </div>
               </div>
             )}
           </div>
