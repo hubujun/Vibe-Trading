@@ -499,7 +499,51 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* Execution detail + history */}
+          {/* 因子挖掘 (Alpha Zoo) */}
+          <div className="rounded-xl border bg-card p-4">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-amber-400" />
+              因子挖掘（Alpha Zoo）
+              <span className="text-xs font-normal text-muted-foreground">
+                Autopilot discovering 阶段 · factor miner + 过拟合三关准入
+              </span>
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              {[
+                { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
+                { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
+                { label: "待评估", value: `${data?.autopilot_factors?.pending?.length ?? "--"}`, color: "text-amber-400" },
+                { label: "已退役", value: `${data?.autopilot_factors?.retired?.length ?? "--"}`, color: "text-muted-foreground" },
+              ].map(k => (
+                <div key={k.label} className="rounded-lg border border-border/60 p-3">
+                  <div className="text-[11px] text-muted-foreground">{k.label}</div>
+                  <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
+                </div>
+              ))}
+            </div>
+            {data?.autopilot_factors?.active?.length ? (
+              <>
+                <div className="text-xs text-muted-foreground mb-2">挖掘产出（活跃因子）</div>
+                <div className="flex flex-wrap gap-2">
+                  {data.autopilot_factors.active.map(f => (
+                    <span key={f.alpha_id} className="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1 text-[11px] font-mono text-emerald-300">
+                      {f.alpha_id}
+                      {f.ic_mean != null && <span className="text-muted-foreground ml-1">IC {f.ic_mean >= 0 ? "+" : ""}{f.ic_mean.toFixed(3)}</span>}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                {data?.autopilot_factors ? "暂无活跃挖掘因子" : "挖掘数据不可用（Autopilot 未启动）"}
+              </div>
+            )}
+            <div className="mt-3 text-xs text-muted-foreground">
+              因子级变体生成器会自动从 zoo 挑选新挖掘因子加入组合候选（研究 → 模拟 → 执行 → 复盘 的螺旋中新因子从这里进入）
+            </div>
+          </div>
+
+          {/* 执行层状态 + 生命周期记录 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
