@@ -522,25 +522,85 @@ export function Workbench() {
               ))}
             </div>
             {data?.autopilot_factors?.active?.length ? (
-              <>
-                <div className="text-xs text-muted-foreground mb-2">挖掘产出（活跃因子）</div>
-                <div className="flex flex-wrap gap-2">
-                  {data.autopilot_factors.active.map(f => (
-                    <span key={f.alpha_id} className="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1 text-[11px] font-mono text-emerald-300">
-                      {f.alpha_id}
-                      {f.ic_mean != null && <span className="text-muted-foreground ml-1">IC {f.ic_mean >= 0 ? "+" : ""}{f.ic_mean.toFixed(3)}</span>}
-                    </span>
-                  ))}
-                </div>
-              </>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground border-b">
+                      <th className="text-left py-2 pr-3">因子</th>
+                      <th className="text-left py-2 px-2">生命周期</th>
+                      <th className="text-right py-2 px-2">交易数</th>
+                      <th className="text-right py-2 px-2">胜率</th>
+                      <th className="text-right py-2 px-2">Profit Factor</th>
+                      <th className="text-right py-2 px-2">Sharpe</th>
+                      <th className="text-right py-2 px-2">IC</th>
+                      <th className="text-right py-2 px-2">已实现 PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.autopilot_factors.active.map(f => {
+                      const s = data.autopilot_factor_stats?.[f.alpha_id];
+                      return (
+                        <tr key={f.alpha_id} className="border-b border-muted/50">
+                          <td className="py-2 pr-3 font-mono text-xs">{f.alpha_id}</td>
+                          <td className="py-2 px-2 text-xs text-muted-foreground">{f.lifecycle || "--"}</td>
+                          <td className="py-2 px-2 text-right font-mono text-xs">{s?.trades ?? 0}</td>
+                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.win_rate ?? 0) >= 0.5 ? "text-emerald-400" : "text-rose-400")}>
+                            {s ? `${(s.win_rate * 100).toFixed(1)}%` : "--"}
+                          </td>
+                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.profit_factor ?? 0) >= 1 ? "text-emerald-400" : "text-rose-400")}>
+                            {s ? (s.profit_factor == null ? "∞" : s.profit_factor.toFixed(2)) : "--"}
+                          </td>
+                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.sharpe ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {s ? s.sharpe.toFixed(2) : "--"}
+                          </td>
+                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.ic_mean ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {f.ic_mean != null ? `${f.ic_mean >= 0 ? "+" : ""}${f.ic_mean.toFixed(3)}` : "--"}
+                          </td>
+                          <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.realized_pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {s ? `${s.realized_pnl >= 0 ? "+" : ""}$${s.realized_pnl.toLocaleString()}` : "--"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="text-xs text-muted-foreground">
                 {data?.autopilot_factors ? "暂无活跃挖掘因子" : "挖掘数据不可用（Autopilot 未启动）"}
               </div>
             )}
-            <div className="mt-3 text-xs text-muted-foreground">
-              因子级变体生成器会自动从 zoo 挑选新挖掘因子加入组合候选（研究 → 模拟 → 执行 → 复盘 的螺旋中新因子从这里进入）
-            </div>
+            {data?.autopilot_factors?.retired?.length ? (
+              <>
+                <div className="text-xs text-muted-foreground mt-4 mb-2">已退役因子</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-muted-foreground border-b">
+                        <th className="text-left py-2 pr-3">因子</th>
+                        <th className="text-left py-2 px-2">退役时间</th>
+                        <th className="text-left py-2 px-2">原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.autopilot_factors.retired.map(f => (
+                        <tr key={f.alpha_id} className="border-b border-muted/50">
+                          <td className="py-2 pr-3 font-mono text-xs text-rose-400">{f.alpha_id}</td>
+                          <td className="py-2 px-2 font-mono text-xs text-muted-foreground">{f.retired_at ? String(f.retired_at).slice(0, 16).replace("T", " ") : "--"}</td>
+                          <td className="py-2 px-2 text-xs text-muted-foreground">{f.reason || "--"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : null}
+            {data?.autopilot_factors && (
+              <div className="mt-3 text-xs text-muted-foreground">
+                {data.autopilot_factors.pending.length > 0 && `待评估: ${data.autopilot_factors.pending.join(", ")} · `}
+                zoo 共 {data.autopilot_factors.zoo_count} 个因子 · 因子级变体生成器会自动从 zoo 挑选新挖掘因子加入组合候选（研究 → 模拟 → 执行 → 复盘 的螺旋中新因子从这里进入）
+              </div>
+            )}
           </div>
 
           {/* 执行层状态 + 生命周期记录 */}
