@@ -783,27 +783,42 @@ export function Workbench() {
                 假设注册表
               </h2>
               <div className="grid grid-cols-1 gap-3">
-                {hypotheses.map(h => (
-                  <div key={h.hypothesis_id} className="rounded-lg border border-border/50 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{h.title}</span>
-                      <span
-                        className={cn(
-                          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                          h.status === "validated" && "bg-emerald-500/20 text-emerald-400",
-                          h.status === "testing" && "bg-amber-500/20 text-amber-400",
-                          h.status === "monitoring" && "bg-cyan-500/20 text-cyan-400",
-                          h.status === "rejected" && "bg-rose-500/20 text-rose-400",
-                          h.status === "exploring" && "bg-muted text-muted-foreground",
-                        )}
-                      >
-                        {h.status}
-                      </span>
+                {hypotheses.map(h => {
+                  const m = review?.variant_metrics?.[h.hypothesis_id];
+                  return (
+                    <div key={h.hypothesis_id} className="rounded-lg border border-border/50 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{h.title}</span>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                            h.status === "validated" && "bg-emerald-500/20 text-emerald-400",
+                            h.status === "testing" && "bg-amber-500/20 text-amber-400",
+                            h.status === "monitoring" && "bg-cyan-500/20 text-cyan-400",
+                            h.status === "rejected" && "bg-rose-500/20 text-rose-400",
+                            h.status === "exploring" && "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {h.status}
+                        </span>
+                      </div>
+                      {h.thesis && <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{h.thesis}</div>}
+                      {m && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                          <span className={cn("rounded bg-muted px-1.5 py-0.5", (m.annual ?? 0) > 0 ? "text-emerald-400" : "text-rose-400")}>
+                            回测 {m.annual != null ? `${m.annual > 0 ? "+" : ""}${m.annual}%` : "--"}
+                          </span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">夏普 {m.sharpe ?? "--"}</span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-rose-400">回撤 {m.max_dd ?? "--"}%</span>
+                          {h.status === "testing" && (
+                            <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">✅ 通过晋升，可进模拟</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{h.hypothesis_id}</div>
                     </div>
-                    {h.thesis && <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{h.thesis}</div>}
-                    <div className="mt-1.5 font-mono text-[10px] text-muted-foreground">{h.hypothesis_id}</div>
-                  </div>
-                ))}
+                  );
+                })}
                 {!hypotheses.length && <div className="text-xs text-muted-foreground">暂无假设记录</div>}
               </div>
             </div>
