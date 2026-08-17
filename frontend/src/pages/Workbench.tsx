@@ -96,9 +96,80 @@ const PHASE_META: Record<
 // 完整生命周期流水线: 挖掘 → 组合 → 研究 → 模拟 → 执行 → 复盘
 const PHASE_ORDER = ["mine", "compose", "research", "paper", "live", "review"];
 
+// 学术因子池 (academic zoo 全部 13 个, 与 variant_backtester.ACADEMIC_MODULES 对齐)
+const ACADEMIC_FACTORS = [
+  { id: "BAB", name: "低贝塔", desc: "Frazzini-Pedersen 低贝塔溢价, 组合基座" },
+  { id: "high52w", name: "52周高点", desc: "George-Hwang 52周高点动量, 组合基座" },
+  { id: "RMW", name: "盈利", desc: "Fama-French 盈利能力(价格代理), 已评估" },
+  { id: "carhart_mom", name: "动量", desc: "Carhart UMD 252-21 日动量" },
+  { id: "strev", name: "短期反转", desc: "21 日收益反转" },
+  { id: "illiq", name: "非流动性", desc: "Amihud 非流动性, 负 IC 反向使用" },
+  { id: "smb", name: "小市值", desc: "Fama-French 规模因子, 负 IC 反向使用" },
+  { id: "hml", name: "价值", desc: "Fama-French 账面市值比" },
+  { id: "cma", name: "投资", desc: "Fama-French 投资因子" },
+  { id: "retskew", name: "收益偏度", desc: "60 日收益偏度反转" },
+  { id: "mkt_rf", name: "市场", desc: "21 日市场收益" },
+  { id: "corr_rewire", name: "相关性重构", desc: "横截面相关性重构" },
+];
+
 function fmtPct(v: number | undefined | null, signed = true): string {
   if (v == null || Number.isNaN(v)) return "--";
   return `${signed && v > 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+// ---------------------------------------------------------------------------
+// 新手名词提示 (量化小白友好)
+// ---------------------------------------------------------------------------
+
+/** 关键术语 → 白话解释 (hover 显示). */
+const TERMS: Record<string, string> = {
+  sharpe: "夏普比率：每承担 1 份风险能换多少超额收益。越高越好，>1 算优秀，0.79 属中等偏上",
+  ic: "IC 信息系数：因子预测方向与真实涨跌的相关系数，范围 -1~1。>0.05 算有预测力，接近 0 就是没用的因子",
+  ir: "IR 信息比率：IC 均值 ÷ IC 波动，衡量预测力稳不稳定。>0.1 说明不是碰运气",
+  icPos: "IC+ 比率：IC 为正的天数占比。>50% 说明因子大多数时候方向是对的",
+  annual: "回测年化：把回测期总收益折算成每年收益（复利口径）。+12.77% = 每年平均赚 12.77%",
+  maxDd: "最大回撤：账户从最高点跌到最低点的最大跌幅。-10.62% = 最惨的时候亏了 10.62%",
+  cum: "累计收益：整个回测期的总收益",
+  nav: "净值：模拟盘账户价值，1.0 = 初始资金，>1.0 赚钱，<1.0 亏钱",
+  rebalance: "调仓：按固定周期（这里每天）重新计算信号、买卖换仓",
+  weight: "权重：各因子在组合评分里的占比。BAB 50% = 组合得分一半来自 BAB 因子",
+  topBot: "多 top3 空 bottom3：每天把 10 个币按因子得分排序，最高的 3 个做多、最低的 3 个做空",
+  winRate: "胜率：赚钱的交易占比。50% 胜率配合高盈亏比也能赚钱",
+  pf: "Profit Factor 盈亏比：总盈利 ÷ 总亏损。>1 才赚钱，>1.5 算健康",
+  pnl: "已实现 PnL：平仓后真正落袋的盈亏（浮盈浮亏不算）",
+  leverage: "杠杆/仓位乘子：实际下注比例。1.0 = 满仓按信号做，0.5 = 只下 5 成仓（风控触发时自动降）",
+  exposure: "仓位乘子：见上方杠杆说明。复盘引擎检测到回撤/连亏会自动降低它来控制风险",
+  zscore: "z-score 标准化：把因子原始值换算成'偏离平均值几个标准差'，让不同因子可以公平相加",
+  crossSection: "横截面：同一天内多个币之间横向比较（比如今天 10 个币里谁得分最高），不是看单个币的时间走势",
+  bab: "BAB 低贝塔因子：做多波动小的币、做空波动大的币，赚'低波动溢价'。学术文献里的经典因子",
+  high52w: "52 周高点因子：离 52 周最高点越近（强势）的币越可能继续涨，动量效应",
+  rmw: "RMW 盈利因子：盈利能力强的公司/币表现更好（用价格波动代理）",
+  exploring: "exploring 探索中：变体刚生成，等待回测验证",
+  testing: "testing 验证中：已通过回测，等待模拟盘验证",
+  validated: "validated 已验证：模拟盘表现合格，可上线",
+  rejected: "rejected 已否决：验证失败（连亏/回撤超限），不再使用",
+  monitoring: "monitoring 观察中：曾经合格但现在回撤超限，降级观察",
+  ddBreach: "回撤超限：模拟盘当前回撤超过回测最大回撤的 1.5 倍，触发风控（降杠杆/建议回炉）",
+  sampleShort: "样本不足：交易记录少于 20 笔，统计上还不能下结论，继续积累",
+  loopNext: "下一圈：复盘后螺旋的去向。回组合 = 继续迭代变体；回研究 = 表现差回炉重做",
+  signalScore: "因子得分：综合所有因子的加权评分，越高越看多",
+  btCompare: "回测对比：800 天历史数据 + 交易成本模拟的结果。COMBO2 = BAB+52周双因子，COMBO3 = 三因子",
+  oos: "OOS 样本外：没用过的数据（未来数据），防过拟合的关键",
+};
+
+/** 术语徽标: 词 + 问号, hover 显示白话解释. */
+function Term({ k, children }: { k: keyof typeof TERMS | string; children?: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 group/term">
+      {children}
+      <span
+        className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-border text-[9px] text-muted-foreground group-hover/term:text-cyan-400"
+        title={TERMS[k] ?? k}
+      >
+        ?
+      </span>
+    </span>
+  );
 }
 
 export function Workbench() {
@@ -289,29 +360,29 @@ export function Workbench() {
     return "pending";
   };
 
-  const stageStats: Record<string, { label: string; value: string; color?: string }[]> = {
+  const stageStats: Record<string, { label: React.ReactNode; value: string; color?: string }[]> = {
     mine: [
       { label: "zoo 因子", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
       { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
-      { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
+      { label: <Term k="exploring">候选（未审判）</Term>, value: `${minedCandidates.length}`, color: "text-amber-400" },
       { label: "退役（唯一因子）", value: `${retiredUniqueCount}`, color: "text-muted-foreground" },
     ],
     compose: [
       { label: "变体候选", value: `${variantCount}`, color: "text-purple-400" },
       { label: "已自动回测", value: `${backtestedCount}`, color: "text-cyan-400" },
-      { label: "晋升 testing", value: `${testingCount}`, color: "text-amber-400" },
+      { label: <Term k="testing">晋升 testing</Term>, value: `${testingCount}`, color: "text-amber-400" },
       { label: "自动回测", value: "每日 08:45" },
     ],
     research: [
       // 选中策略自己的回测指标 (播种策略来自变体回测缓存, 基策略回退 COMBO2)
-      { label: "回测年化", value: (strategy?.strategy_backtest?.annual ?? combo2?.annual) != null ? fmtPct(strategy?.strategy_backtest?.annual ?? combo2?.annual) : "--", color: "text-emerald-400" },
-      { label: "回测夏普", value: (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe) != null ? (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe!).toFixed(2) : "--" },
-      { label: "最大回撤", value: (strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) != null ? fmtPct(strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) : "--", color: "text-rose-400" },
-      { label: "累计收益", value: (strategy?.strategy_backtest?.cum ?? combo2?.cum) != null ? fmtPct(strategy?.strategy_backtest?.cum ?? combo2?.cum) : "--", color: "text-emerald-400" },
+      { label: <Term k="annual">回测年化</Term>, value: (strategy?.strategy_backtest?.annual ?? combo2?.annual) != null ? fmtPct(strategy?.strategy_backtest?.annual ?? combo2?.annual) : "--", color: "text-emerald-400" },
+      { label: <Term k="sharpe">回测夏普</Term>, value: (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe) != null ? (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe!).toFixed(2) : "--" },
+      { label: <Term k="maxDd">最大回撤</Term>, value: (strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) != null ? fmtPct(strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) : "--", color: "text-rose-400" },
+      { label: <Term k="cum">累计收益</Term>, value: (strategy?.strategy_backtest?.cum ?? combo2?.cum) != null ? fmtPct(strategy?.strategy_backtest?.cum ?? combo2?.cum) : "--", color: "text-emerald-400" },
     ],
     paper: [
-      { label: "模拟盘净值", value: paper?.nav != null ? paper.nav.toFixed(4) : "--", color: "text-emerald-400" },
-      { label: "调仓次数", value: `${paper?.trades?.length ?? 0}` },
+      { label: <Term k="nav">模拟盘净值</Term>, value: paper?.nav != null ? paper.nav.toFixed(4) : "--", color: "text-emerald-400" },
+      { label: <Term k="rebalance">调仓次数</Term>, value: `${paper?.trades?.length ?? 0}` },
       { label: "起于", value: paper?.started_at ? String(paper.started_at).slice(0, 10) : "--" },
       { label: "最新信号", value: paper?.last_signal_date ?? "--", color: "text-amber-400" },
     ],
@@ -323,9 +394,9 @@ export function Workbench() {
     ],
     review: [
       { label: "vs 回测", value: review?.vs_backtest?.outperforming == null ? "样本不足" : review.vs_backtest!.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest?.outperforming ? "text-emerald-400" : review?.vs_backtest?.outperforming == null ? undefined : "text-rose-400" },
-      { label: "回撤超限", value: review?.vs_backtest?.dd_breach ? "是" : "否", color: review?.vs_backtest?.dd_breach ? "text-rose-400" : "text-emerald-400" },
+      { label: <Term k="ddBreach">回撤超限</Term>, value: review?.vs_backtest?.dd_breach ? "是" : "否", color: review?.vs_backtest?.dd_breach ? "text-rose-400" : "text-emerald-400" },
       { label: "信号新鲜度", value: review?.signal_health?.stale ? "过期" : "正常", color: review?.signal_health?.stale ? "text-amber-400" : "text-emerald-400" },
-      { label: "下一圈", value: review?.loop_next === "research" ? "回研究(回炉)" : "回组合(迭代)", color: review?.loop_next === "research" ? "text-rose-400" : "text-purple-400" },
+      { label: <Term k="loopNext">下一圈</Term>, value: review?.loop_next === "research" ? "回研究(回炉)" : "回组合(迭代)", color: review?.loop_next === "research" ? "text-rose-400" : "text-purple-400" },
     ],
   };
 
@@ -419,7 +490,7 @@ export function Workbench() {
             </span>
             <span className="text-xs text-muted-foreground">{strategy.universe_size} 币 · {strategy.rebalance}</span>
             <span className="text-xs text-muted-foreground">
-              杠杆 ×{strategy.params?.exposure_multiplier ?? 1.0}
+              <Term k="leverage">杠杆 ×{strategy.params?.exposure_multiplier ?? 1.0}</Term>
             </span>
             <span className="text-xs text-muted-foreground ml-auto">{strategy.description}</span>
           </div>
@@ -502,8 +573,8 @@ export function Workbench() {
                     {passed && p !== "review" && <span className="ml-auto rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-400">✓</span>}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    {stats.map(s => (
-                      <div key={s.label}>
+                    {stats.map((s, si) => (
+                      <div key={`${si}-${String(s.label).slice(0, 8)}`}>
                         <div className="text-[11px] text-muted-foreground">{s.label}</div>
                         <div className={cn("font-mono text-lg font-bold mt-0.5", s.color ?? "text-foreground")}>{s.value}</div>
                       </div>
@@ -532,7 +603,7 @@ export function Workbench() {
                     <div key={sym} className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
                       <div className="flex justify-between items-center">
                         <span className="font-mono text-sm font-semibold">{sym}</span>
-                        <span className="text-xs text-emerald-400 font-mono">{paper?.scores?.[sym]?.toFixed(2) ?? "--"}</span>
+                        <span className="text-xs text-emerald-400 font-mono" title={TERMS.signalScore}>{paper?.scores?.[sym]?.toFixed(2) ?? "--"}</span>
                       </div>
                       <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
                         <div className="h-full bg-emerald-400" style={{ width: `${Math.min(100, Math.max(8, ((paper?.scores?.[sym] ?? 0) + 2) * 30))}%` }} />
@@ -579,16 +650,19 @@ export function Workbench() {
           {/* Backtest + IC */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3">回测对比（800天 · 含成本）</h2>
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                回测对比（800天 · 含成本）
+                <Term k="btCompare">?</Term>
+              </h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-xs text-muted-foreground border-b">
                       <th className="text-left py-2 pr-3">策略</th>
-                      <th className="text-right py-2 px-2">年化</th>
-                      <th className="text-right py-2 px-2">夏普</th>
-                      <th className="text-right py-2 px-2">最大回撤</th>
-                      <th className="text-right py-2 px-2">累计</th>
+                      <th className="text-right py-2 px-2"><Term k="annual">年化</Term></th>
+                      <th className="text-right py-2 px-2"><Term k="sharpe">夏普</Term></th>
+                      <th className="text-right py-2 px-2"><Term k="maxDd">最大回撤</Term></th>
+                      <th className="text-right py-2 px-2"><Term k="cum">累计</Term></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -671,37 +745,72 @@ export function Workbench() {
               </span>
             </div>
 
-            {/* 学术层: 文献因子 IC */}
+            {/* 学术层: 文献因子 IC + 完整因子池 */}
             {tier === "academic" && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-muted-foreground border-b">
-                      <th className="text-left py-2 pr-3">因子</th>
-                      <th className="text-right py-2 px-2">IC均值</th>
-                      <th className="text-right py-2 px-2">IR</th>
-                      <th className="text-right py-2 px-2">IC+ 比率</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {icRows.map(([name, m]) => (
-                      <tr key={name} className="border-b border-muted/50">
-                        <td className="py-2 pr-3 font-medium">{name}</td>
-                        <td className={cn("text-right py-2 px-2 font-mono", m.ic_mean >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {m.ic_mean > 0 ? "+" : ""}{m.ic_mean.toFixed(4)}
-                        </td>
-                        <td className={cn("text-right py-2 px-2 font-mono", m.ir >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {m.ir > 0 ? "+" : ""}{m.ir.toFixed(3)}
-                        </td>
-                        <td className="text-right py-2 px-2 font-mono">{m.ic_pos.toFixed(1)}%</td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-xs text-muted-foreground border-b">
+                        <th className="text-left py-2 pr-3">因子</th>
+                        <th className="text-right py-2 px-2"><Term k="ic">IC均值</Term></th>
+                        <th className="text-right py-2 px-2"><Term k="ir">IR</Term></th>
+                        <th className="text-right py-2 px-2"><Term k="icPos">IC+ 比率</Term></th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  文献因子（Frazzini-Pedersen BAB / Fama-French RMW / George-Hwang 52周高点）· 回测期 800 天 · 组合基座
+                    </thead>
+                    <tbody>
+                      {icRows.map(([name, m]) => (
+                        <tr key={name} className="border-b border-muted/50">
+                          <td className="py-2 pr-3 font-medium">{name}</td>
+                          <td className={cn("text-right py-2 px-2 font-mono", m.ic_mean >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {m.ic_mean > 0 ? "+" : ""}{m.ic_mean.toFixed(4)}
+                          </td>
+                          <td className={cn("text-right py-2 px-2 font-mono", m.ir >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {m.ir > 0 ? "+" : ""}{m.ir.toFixed(3)}
+                          </td>
+                          <td className="text-right py-2 px-2 font-mono">{m.ic_pos.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  已评估 3 因子（回测期 800 天）· 组合基座：BAB + high52w · RMW 备选（COMBO3 跑输）
+                </div>
+                <div className="text-xs text-muted-foreground mt-4 mb-2">完整学术因子池（{ACADEMIC_FACTORS.length} 个 · 文献因子）</div>
+                <div className="flex flex-wrap gap-2">
+                  {ACADEMIC_FACTORS.map(f => {
+                    const inCombo = f.id === "BAB" || f.id === "high52w";
+                    const evaluated = f.id === "BAB" || f.id === "high52w" || f.id === "RMW";
+                    const inPool = f.id === "RMW";
+                    return (
+                      <span
+                        key={f.id}
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-mono",
+                          inCombo
+                            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                            : evaluated
+                              ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+                              : inPool
+                                ? "border-amber-500/30 bg-amber-500/5 text-amber-400"
+                                : "border-border/60 bg-muted/30 text-muted-foreground",
+                        )}
+                        title={f.desc}
+                      >
+                        {f.id}
+                        <span className="ml-1 font-sans text-[10px] opacity-70">{f.name}</span>
+                        {inCombo && <span className="ml-1 text-[10px]">· 组合基座</span>}
+                        {evaluated && !inCombo && <span className="ml-1 text-[10px]">· 已评估</span>}
+                        {!evaluated && <span className="ml-1 text-[10px]">· 待评估</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="mt-3 text-xs text-muted-foreground">
+                  待评估学术因子已加入变体生成候选 → 每日 08:45 自动回测 → 跑赢基策略晋升 testing
+                </div>
+              </>
             )}
 
             {/* 挖掘层: factor miner 产出 */}
@@ -711,10 +820,10 @@ export function Workbench() {
                   {[
                     { label: "zoo 因子总数", value: `${data?.autopilot_factors?.zoo_count ?? "--"}` },
                     { label: "活跃（交易中）", value: `${data?.autopilot_factors?.active?.length ?? "--"}`, color: "text-emerald-400" },
-                    { label: "候选（未审判）", value: `${minedCandidates.length}`, color: "text-amber-400" },
+                    { label: <Term k="exploring">候选（未审判）</Term>, value: `${minedCandidates.length}`, color: "text-amber-400" },
                     { label: "退役（唯一因子）", value: `${retiredUniqueCount}`, color: "text-muted-foreground" },
-                  ].map(k => (
-                    <div key={k.label} className="rounded-lg border border-border/60 p-3">
+                  ].map((k, ki) => (
+                    <div key={ki} className="rounded-lg border border-border/60 p-3">
                       <div className="text-[11px] text-muted-foreground">{k.label}</div>
                       <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
                     </div>
@@ -728,11 +837,11 @@ export function Workbench() {
                           <th className="text-left py-2 pr-3">因子</th>
                           <th className="text-left py-2 px-2">生命周期</th>
                           <th className="text-right py-2 px-2">交易数</th>
-                          <th className="text-right py-2 px-2">胜率</th>
-                          <th className="text-right py-2 px-2">Profit Factor</th>
-                          <th className="text-right py-2 px-2">Sharpe</th>
+                          <th className="text-right py-2 px-2"><Term k="winRate">胜率</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="pf">Profit Factor</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="sharpe">Sharpe</Term></th>
                           <th className="text-right py-2 px-2">IC</th>
-                          <th className="text-right py-2 px-2">已实现 PnL</th>
+                          <th className="text-right py-2 px-2"><Term k="pnl">已实现 PnL</Term></th>
                         </tr>
                       </thead>
                       <tbody>
