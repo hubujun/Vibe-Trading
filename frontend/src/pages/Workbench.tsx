@@ -10,6 +10,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Receipt,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -564,6 +565,81 @@ export function Workbench() {
               ) : (
                 <div className="text-xs text-muted-foreground">暂无生命周期记录 — 使用右上角按钮推进策略阶段</div>
               )}
+            </div>
+          </div>
+
+          {/* 执行明细: 表现 + 持仓 + 交易记录 */}
+          <div className="rounded-xl border bg-card p-4">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Receipt className="h-4 w-4 text-cyan-400" />
+              执行明细（纸面账户）
+            </h2>
+            {data?.autopilot_performance ? (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                {[
+                  { label: "胜率", value: `${(data.autopilot_performance.win_rate * 100).toFixed(1)}%`, color: "text-emerald-400" },
+                  { label: "已实现 PnL", value: `$${data.autopilot_performance.realized_pnl_usd.toLocaleString()}`, color: data.autopilot_performance.realized_pnl_usd >= 0 ? "text-emerald-400" : "text-rose-400" },
+                  { label: "总交易", value: `${data.autopilot_performance.total_trades}` },
+                  { label: "夏普", value: data.autopilot_performance.sharpe.toFixed(2) },
+                  { label: "最大回撤", value: `${(data.autopilot_performance.max_drawdown * 100).toFixed(1)}%`, color: "text-rose-400" },
+                ].map(k => (
+                  <div key={k.label} className="rounded-lg border border-border/60 p-3">
+                    <div className="text-[11px] text-muted-foreground">{k.label}</div>
+                    <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <div className="text-xs text-muted-foreground mb-2">
+                  当前持仓（{data?.autopilot_positions?.length ?? 0}）
+                </div>
+                {data?.autopilot_positions?.length ? (
+                  <div className="space-y-2">
+                    {data.autopilot_positions.map(p => (
+                      <div key={p.symbol} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2 text-sm">
+                        <span className="font-mono font-medium">{p.symbol}</span>
+                        <span className={cn("text-xs font-mono", p.side === "buy" ? "text-emerald-400" : "text-rose-400")}>
+                          {p.side === "buy" ? "多" : "空"} {p.quantity}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono">@{p.entry_price}</span>
+                        <span className={cn("text-xs font-mono", p.unrealized_pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {p.unrealized_pnl >= 0 ? "+" : ""}{p.unrealized_pnl.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">无持仓</div>
+                )}
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-2">最近交易记录</div>
+                {data?.autopilot_trades?.length ? (
+                  <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
+                    {data.autopilot_trades.slice(0, 12).map((t, i) => (
+                      <div key={`${t.ts}-${i}`} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2 text-xs">
+                        <span className="font-mono">{t.symbol}</span>
+                        <span className={cn("font-mono", t.side === "buy" ? "text-emerald-400" : "text-rose-400")}>
+                          {t.side === "buy" ? "买入" : "卖出"}
+                        </span>
+                        <span className="font-mono text-muted-foreground">
+                          {t.price != null ? t.price.toFixed(2) : "--"} × {t.quantity ?? "--"}
+                        </span>
+                        {t.realized_pnl != null && (
+                          <span className={cn("font-mono", t.realized_pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            {t.realized_pnl >= 0 ? "+" : ""}{t.realized_pnl.toFixed(2)}
+                          </span>
+                        )}
+                        <span className="text-muted-foreground/70 font-mono">{String(t.ts ?? "").slice(0, 16).replace("T", " ")}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">暂无交易记录</div>
+                )}
+              </div>
             </div>
           </div>
 

@@ -357,6 +357,149 @@ def _load_data_health() -> AutopilotDataHealth:
         return AutopilotDataHealth()
 
 
+# --- 供 workbench 聚合复用的 loader (fail-open, 返回可序列化 dict) ---
+
+
+def load_trades_for_dashboard(limit: int = 50) -> list[dict[str, Any]]:
+    """Read the unified trade ledger, newest first (best-effort)."""
+    from src.crypto_autopilot.trade_ledger import read_trade_records
+
+    try:
+        records = read_trade_records(_RUNTIME_ROOT, limit=limit)
+        return [
+            AutopilotTradeRecord(**r).model_dump()
+            for r in records
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def load_positions_for_dashboard() -> list[dict[str, Any]]:
+    """Read open paper positions with unrealized P&L (best-effort)."""
+    from src.crypto_autopilot.config import load_autopilot_config
+    from src.crypto_autopilot.paper_engine import PaperEngine
+
+    try:
+        engine = PaperEngine(
+            config=load_autopilot_config(), runtime_root=_RUNTIME_ROOT,
+        )
+        raw = engine.get_positions()
+        return [
+            AutopilotPosition(
+                symbol=p.symbol,
+                side=p.side,
+                quantity=round(float(p.quantity), 8),
+                entry_price=round(float(p.entry_price), 4),
+                entry_time=(
+                    p.entry_time.isoformat()
+                    if hasattr(p.entry_time, "isoformat")
+                    else str(p.entry_time)
+                ),
+                unrealized_pnl=round(float(p.unrealized_pnl), 4),
+            ).model_dump()
+            for p in raw
+        ]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def load_performance_for_dashboard() -> dict[str, Any] | None:
+    """Derive paper-account metrics from the ledger (best-effort)."""
+    try:
+        import numpy as np
+
+        from src.crypto_autopilot.config import load_autopilot_config
+        from src.crypto_autopilot.paper_engine import PaperEngine
+        from src.crypto_autopilot.trade_ledger import (
+            read_slippage_records,
+            read_trade_records,
+        )
+
+        records = read_trade_records(_RUNTIME_ROOT, limit=10_000)
+        slip = read_slippage_records(_RUNTIME_ROOT)
+        avg_slippage_bps = (
+            round(sum(float(r.get("bps", 0.0)) for r in slip) / len(slip), 2)
+            if slip else None
+        )
+        wins = losses = 0
+        realized = 0.0
+        daily: dict[str, float] = {}
+        for rec in records:
+            pnl = rec.get("realized_pnl")
+            if pnl is None:
+                continue
+            realized += pnl
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+            day = str(rec.get("ts", ""))[:10]
+            if day:
+                daily[day] = daily.get(day, 0.0) + pnl
+        closed = wins + losses
+        days = [{"date": d, "pnl_usd": round(v, 2)} for d, v in sorted(daily.items())]
+        sharpe = 0.0
+        max_dd = 0.0
+        if len(days) >= 2:
+            values = np.array([d["pnl_usd"] for d in days], dtype=np.float64)
+            std = float(np.std(values, ddof=1))
+            if std > 0:
+                sharpe = float(np.mean(values)) / std * np.sqrt(365)
+            cum = np.cumsum(values)
+            running_max = np.maximum.accumulate(cum)
+            peak = float(np.max(running_max))
+            if peak > 0:
+                max_dd = float(np.max(running_max - cum)) / peak
+        engine = PaperEngine(
+            config=load_autopilot_config(), runtime_root=_RUNTIME_ROOT,
+        )
+        try:
+            exposure = engine.open_exposure_usd()
+        except Exception:  # noqa: BLE001
+            exposure = 0.0
+        return {
+            "total_trades": len(records),
+            "open_positions": sum(1 for f in engine._positions.values() if f),
+            "open_exposure_usd": round(exposure, 2),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / closed, 4) if closed else 0.0,
+            "realized_pnl_usd": round(realized, 2),
+            "sharpe": round(sharpe, 4),
+            "max_drawdown": round(max_dd, 4),
+            "daily_pnl": days,
+            "avg_slippage_bps": avg_slippage_bps,
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def load_factors_for_dashboard() -> dict[str, Any] | None:
+    """Read active/pending/retired factors plus zoo counts (best-effort)."""
+    import json
+
+    from src.crypto_autopilot.factor_store import FactorStore
+
+    try:
+        payload: dict = {}
+        try:
+            payload = json.loads(
+                (_RUNTIME_ROOT / "factors.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError, TypeError):
+            pass
+        zoo = FactorStore().list_factors_with_meta()
+        return {
+            "active": payload.get("active", []),
+            "pending": [str(x) for x in payload.get("pending", [])],
+            "retired": payload.get("retired", []),
+            "zoo_count": len(zoo),
+            "updated_at": payload.get("updated_at"),
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def register_autopilot_routes(
     app: FastAPI,
     require_auth: AuthDep | None = None,
