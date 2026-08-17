@@ -58,6 +58,18 @@ FACTOR_POOL: list[str] = [
     "open_volume_reversal",
 ]
 
+#: 学术因子池 — academic zoo 除组合基座 (BAB/high52w) 外的可探索因子
+ACADEMIC_POOL: list[str] = [
+    "carhart_mom",   # 动量 (Carhart UMD)
+    "strev",         # 短期反转
+    "illiq",         # 非流动性 (负 IC, 反向)
+    "smb",           # 小市值 (负 IC, 反向)
+    "hml",           # 价值
+    "cma",           # 投资
+    "retskew",       # 收益偏度
+    "mkt_rf",        # 市场因子
+]
+
 #: 基策略定义 — 当前 fork 主策略 (与 combo_backtest/daily_signal 一致).
 BASE_STRATEGY = {
     "name": "BAB+high52w 双因子组合",
@@ -117,14 +129,23 @@ def _retired_factor_ids() -> set[str]:
 
 
 def _factor_level_variants() -> list[dict[str, Any]]:
-    """从 zoo 挖掘因子生成因子级变体 (三因子: BAB + high52w + X).
+    """从因子池生成因子级变体 (三因子: BAB + high52w + X).
 
-    仅包含 zoo 实际存在且未退役 (未被过拟合三关刷掉) 的因子 —
+    - 学术池 (ACADEMIC_POOL): 文献因子, 代码库固定资产, 恒可用
+    - 挖掘池 (FACTOR_POOL): zoo 实际存在且未退役 (未被过拟合三关刷掉) 的因子
     挖掘引擎产出新因子后, 这里自动出现新候选, 形成 挖掘 → 组合 的通路.
     """
     zoo_ids = _zoo_factor_ids()
     retired_ids = _retired_factor_ids()
     variants: list[dict[str, Any]] = []
+    for fid in ACADEMIC_POOL:
+        variants.append(
+            {
+                "name": f"加入学术因子 {fid}",
+                "factors": ["BAB", "high52w", fid],
+                "weights": {"BAB": 1 / 3, "high52w": 1 / 3, fid: 1 / 3},
+            }
+        )
     for fid in FACTOR_POOL:
         if fid in zoo_ids and fid not in retired_ids:
             variants.append(
