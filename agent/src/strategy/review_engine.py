@@ -162,6 +162,8 @@ class StrategyReview:
     variants: list[dict[str, Any]] = field(default_factory=list)
     variant_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     recommendations: list[ReviewRecommendation] = field(default_factory=list)
+    #: 下一圈去向: compose(回组合迭代) / research(回研究回炉)
+    loop_next: str = "compose"
     reviewed_at: str = field(default_factory=_utc_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -174,6 +176,7 @@ class StrategyReview:
             "variants": list(self.variants),
             "variant_metrics": dict(self.variant_metrics),
             "recommendations": [r.to_dict() for r in self.recommendations],
+            "loop_next": self.loop_next,
             "reviewed_at": self.reviewed_at,
         }
 
@@ -322,12 +325,15 @@ def compute_review(
             )
         )
     if vs.dd_breach:
+        review.loop_next = "research"
         recs.append(
             ReviewRecommendation(
                 level="critical",
                 text=f"模拟盘回撤 {vs.current_dd}% 已超过回测最大回撤 {vs.backtest_max_dd}% 的 {DD_BREACH_MULTIPLIER} 倍，建议暂停并回研究",
             )
         )
+    if vs.consecutive_losses >= CONSECUTIVE_LOSSES:
+        review.loop_next = "research"
     if review.signal_health.stale:
         recs.append(
             ReviewRecommendation(
