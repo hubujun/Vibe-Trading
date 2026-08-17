@@ -298,6 +298,9 @@ export function Workbench() {
               因子: {strategy.factors.join(" + ")} · 权重: {Object.entries(strategy.weights).map(([k, v]) => `${k} ${v * 100}%`).join(" / ")}
             </span>
             <span className="text-xs text-muted-foreground">{strategy.universe_size} 币 · {strategy.rebalance}</span>
+            <span className="text-xs text-muted-foreground">
+              杠杆 ×{strategy.params?.exposure_multiplier ?? 1.0}
+            </span>
             <span className="text-xs text-muted-foreground ml-auto">{strategy.description}</span>
           </div>
         </div>
@@ -614,6 +617,38 @@ export function Workbench() {
                           <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">{u.to_status}</span>
                           <span className="truncate">· {u.reason}</span>
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              {review?.adaptations?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">参数自适应（已应用）</div>
+                  <div className="space-y-2">
+                    {review.adaptations.map((a, i) => (
+                      <div key={`${a.param}-${i}`} className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold text-cyan-300">{a.param}</span>
+                          <span className="font-mono">{a.from_value.toFixed(2)} → {a.to_value.toFixed(2)}</span>
+                          <span className="truncate text-muted-foreground">· {a.reason}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              {review?.variants?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">🧬 下一代实验候选（已进 exploring）</div>
+                  <div className="space-y-2">
+                    {review.variants.map(v => (
+                      <div key={v.hypothesis_id} className="rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{v.title}</span>
+                          <span className="ml-auto shrink-0 rounded bg-purple-500/20 px-1.5 py-0.5 text-purple-300">{v.status}</span>
+                        </div>
+                        <div className="mt-1 font-mono text-[10px] text-muted-foreground truncate">{v.signal_definition}</div>
                       </div>
                     ))}
                   </div>
