@@ -122,6 +122,10 @@ class WorkbenchResponse(BaseModel):
     strategies: list[WorkbenchStrategy] = Field(default_factory=list)
     combo: ComboSummary = Field(default_factory=ComboSummary)
     autopilot: AutopilotStatusResponse | None = None
+    autopilot_trades: list[dict[str, Any]] = Field(default_factory=list)
+    autopilot_positions: list[dict[str, Any]] = Field(default_factory=list)
+    autopilot_performance: Optional[dict[str, Any]] = None
+    autopilot_factors: Optional[dict[str, Any]] = None
     review: dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[str] = None
 
@@ -362,6 +366,22 @@ def register_workbench_routes(
             logger.warning("workbench: autopilot aggregation failed", exc_info=True)
             autopilot = None
         try:
+            from src.api.autopilot_routes import (
+                load_factors_for_dashboard,
+                load_performance_for_dashboard,
+                load_positions_for_dashboard,
+                load_trades_for_dashboard,
+            )
+
+            autopilot_trades = load_trades_for_dashboard(limit=30)
+            autopilot_positions = load_positions_for_dashboard()
+            autopilot_performance = load_performance_for_dashboard()
+            autopilot_factors = load_factors_for_dashboard()
+        except Exception:  # noqa: BLE001
+            logger.warning("workbench: autopilot detail aggregation failed", exc_info=True)
+            autopilot_trades, autopilot_positions = [], []
+            autopilot_performance = autopilot_factors = None
+        try:
             combo = ComboSummary(
                 signal=_load_signal(),
                 paper=_load_paper(),
@@ -404,6 +424,10 @@ def register_workbench_routes(
             strategies=[WorkbenchStrategy(**s) for s in raw_strategies],
             combo=combo,
             autopilot=autopilot,
+            autopilot_trades=autopilot_trades,
+            autopilot_positions=autopilot_positions,
+            autopilot_performance=autopilot_performance,
+            autopilot_factors=autopilot_factors,
             review=review_dict,
             updated_at=_now_iso(),
         )

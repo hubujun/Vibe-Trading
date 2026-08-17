@@ -1891,6 +1891,16 @@ export interface WorkbenchResponse {
   strategies: WorkbenchStrategy[];
   combo: ComboSummary;
   autopilot: AutopilotStatus | null;
+  autopilot_trades: AutopilotTradeRecord[];
+  autopilot_positions: AutopilotPosition[];
+  autopilot_performance: AutopilotPerformance | null;
+  autopilot_factors: {
+    active: AutopilotFactorInfo[];
+    pending: string[];
+    retired: AutopilotRetiredFactor[];
+    zoo_count: number;
+    updated_at: string | null;
+  } | null;
   review: WorkbenchReview;
   updated_at?: string | null;
 }
