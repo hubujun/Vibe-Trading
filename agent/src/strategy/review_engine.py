@@ -160,6 +160,7 @@ class StrategyReview:
     hypothesis_updates: list[ReviewHypothesisUpdate] = field(default_factory=list)
     adaptations: list[ReviewAdaptation] = field(default_factory=list)
     variants: list[dict[str, Any]] = field(default_factory=list)
+    variant_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     recommendations: list[ReviewRecommendation] = field(default_factory=list)
     reviewed_at: str = field(default_factory=_utc_now)
 
@@ -171,6 +172,7 @@ class StrategyReview:
             "hypothesis_updates": [u.to_dict() for u in self.hypothesis_updates],
             "adaptations": [a.to_dict() for a in self.adaptations],
             "variants": list(self.variants),
+            "variant_metrics": dict(self.variant_metrics),
             "recommendations": [r.to_dict() for r in self.recommendations],
             "reviewed_at": self.reviewed_at,
         }

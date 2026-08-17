@@ -407,13 +407,23 @@ def register_workbench_routes(
             # 第二圈: 变体生成 — 已验证基策略自动产下一代实验候选
             try:
                 from src.hypotheses.registry import HypothesisRegistry
+                from src.strategy.variant_backtester import load_backtest_cache
                 from src.strategy.variant_generator import generate_variants
 
-                variants = generate_variants(
-                    HypothesisRegistry(Path.home() / ".vibe-trading" / "hypotheses.json"),
-                    max_new=2,
-                )
+                registry = HypothesisRegistry(Path.home() / ".vibe-trading" / "hypotheses.json")
+                variants = generate_variants(registry, max_new=2)
                 review.variants = variants
+                # 第四圈: 附带回测缓存指标 (signal_definition → metrics 关联到 hypothesis_id)
+                cache = load_backtest_cache()
+                variant_metrics: dict[str, dict[str, Any]] = {}
+                for h in registry.list():
+                    sd = str(getattr(h, "signal_definition", "") or "")
+                    if sd in cache:
+                        m = cache[sd]
+                        variant_metrics[str(h.hypothesis_id)] = {
+                            k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum", "backtested_at")
+                        }
+                review.variant_metrics = variant_metrics
             except Exception:  # noqa: BLE001
                 logger.warning("workbench: variant generation failed", exc_info=True)
             review_dict = review.to_dict()
