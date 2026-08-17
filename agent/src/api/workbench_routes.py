@@ -126,6 +126,7 @@ class WorkbenchResponse(BaseModel):
     autopilot_positions: list[dict[str, Any]] = Field(default_factory=list)
     autopilot_performance: Optional[dict[str, Any]] = None
     autopilot_factors: Optional[dict[str, Any]] = None
+    autopilot_factor_stats: dict[str, Any] = Field(default_factory=dict)
     review: dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[str] = None
 
@@ -367,6 +368,7 @@ def register_workbench_routes(
             autopilot = None
         try:
             from src.api.autopilot_routes import (
+                load_factor_stats_for_dashboard,
                 load_factors_for_dashboard,
                 load_performance_for_dashboard,
                 load_positions_for_dashboard,
@@ -377,10 +379,12 @@ def register_workbench_routes(
             autopilot_positions = load_positions_for_dashboard()
             autopilot_performance = load_performance_for_dashboard()
             autopilot_factors = load_factors_for_dashboard()
+            autopilot_factor_stats = load_factor_stats_for_dashboard() or {}
         except Exception:  # noqa: BLE001
             logger.warning("workbench: autopilot detail aggregation failed", exc_info=True)
             autopilot_trades, autopilot_positions = [], []
             autopilot_performance = autopilot_factors = None
+            autopilot_factor_stats = {}
         try:
             combo = ComboSummary(
                 signal=_load_signal(),
@@ -438,6 +442,7 @@ def register_workbench_routes(
             autopilot_positions=autopilot_positions,
             autopilot_performance=autopilot_performance,
             autopilot_factors=autopilot_factors,
+            autopilot_factor_stats=autopilot_factor_stats,
             review=review_dict,
             updated_at=_now_iso(),
         )
