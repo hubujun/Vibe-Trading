@@ -300,6 +300,13 @@ export const api = {
     request<AutopilotPositionsResponse>("/api/autopilot/positions", { signal }),
   getComboSummary: (signal?: AbortSignal) =>
     request<ComboSummary>("/api/combo/summary", { signal }),
+  getWorkbench: (signal?: AbortSignal) =>
+    request<WorkbenchResponse>("/api/workbench", { signal, cache: "no-store" }),
+  transitionStrategy: (strategyId: string, action: string, note?: string) =>
+    request<WorkbenchStrategy>(`/api/workbench/strategies/${strategyId}/transition`, {
+      method: "POST",
+      body: JSON.stringify({ action, note }),
+    }),
   getOptionsSurface: (ticker: string, signal?: AbortSignal) =>
     request<OptionsSurface>(
       `/api/options-lab/surface?ticker=${encodeURIComponent(ticker)}`,
@@ -1497,6 +1504,37 @@ export interface ComboSummary {
   paper: ComboPaper;
   metrics: ComboMetrics;
   hypotheses: ComboHypothesis[];
+  updated_at?: string | null;
+}
+
+/** One lifecycle-move record in the strategy state machine. */
+export interface WorkbenchPhaseEvent {
+  phase: string;
+  at: string;
+  action: string;
+  note?: string | null;
+}
+
+/** One strategy on the lifecycle pipeline (research → paper → live). */
+export interface WorkbenchStrategy {
+  strategy_id: string;
+  name: string;
+  description: string;
+  factors: string[];
+  weights: Record<string, number>;
+  universe_size: number;
+  rebalance: string;
+  phase: string; // research | paper | live | paused
+  paused_from?: string | null;
+  phase_history: WorkbenchPhaseEvent[];
+  updated_at?: string | null;
+}
+
+/** Aggregated pipeline view: strategies + combo research + autopilot execution. */
+export interface WorkbenchResponse {
+  strategies: WorkbenchStrategy[];
+  combo: ComboSummary;
+  autopilot: AutopilotStatus | null;
   updated_at?: string | null;
 }
 

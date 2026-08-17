@@ -40,6 +40,9 @@ const PortfolioStudio = lazy(() =>
 const Combo = lazy(() =>
   import("@/pages/Combo").then((m) => ({ default: m.Combo })),
 );
+const Workbench = lazy(() =>
+  import("@/pages/Workbench").then((m) => ({ default: m.Workbench })),
+);
 
 function PageLoader() {
   return (
@@ -80,6 +83,7 @@ export const router = createBrowserRouter([
       { path: "/options-lab", element: wrap(OptionsLab) },
       { path: "/portfolio-studio", element: wrap(PortfolioStudio) },
       { path: "/combo", element: wrap(Combo) },
+      { path: "/workbench", element: wrap(Workbench) },
     ],
   },
 ]);
