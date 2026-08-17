@@ -533,6 +533,33 @@ def register_workbench_routes(
         """推进/回退/暂停/恢复一条策略的生命周期."""
         return _transition(strategy_id, body.action, body.note)
 
+    @app.delete(
+        "/api/workbench/strategies/{strategy_id}",
+        dependencies=[Depends(require_auth)],
+    )
+    async def workbench_delete_strategy(strategy_id: str) -> dict[str, str]:
+        """删除一条策略 (组合层变体播种的并行策略可清理)."""
+        import shutil
+
+        with _lock:
+            strategies = _read_strategies()
+            idx = next(
+                (i for i, s in enumerate(strategies) if s.get("strategy_id") == strategy_id),
+                None,
+            )
+            if idx is None:
+                raise HTTPException(status_code=404, detail=f"策略不存在: {strategy_id}")
+            removed = strategies.pop(idx)
+            # 保护: 默认种子策略不可删 (删了下次 GET 会重新播种)
+            if removed.get("strategy_id") == DEFAULT_STRATEGIES[0]["strategy_id"]:
+                raise HTTPException(status_code=400, detail="基策略 (默认种子) 不可删除")
+            _write_strategies(strategies)
+        # 清理独立运行目录 (尽力而为, 不阻塞)
+        run_dir = Path(removed.get("run_dir") or "")
+        if run_dir.exists() and run_dir.name.startswith("paper_combo_"):
+            shutil.rmtree(run_dir, ignore_errors=True)
+        return {"deleted": strategy_id}
+
     @app.post(
         "/api/workbench/strategies",
         response_model=WorkbenchStrategy,
