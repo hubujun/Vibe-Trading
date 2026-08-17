@@ -110,6 +110,8 @@ class WorkbenchStrategy(BaseModel):
     rebalance: str = ""
     phase: str = "research"
     paused_from: Optional[str] = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    adaptation_history: list[dict[str, Any]] = Field(default_factory=list)
     phase_history: list[WorkbenchPhaseEvent] = Field(default_factory=list)
     updated_at: Optional[str] = None
 
@@ -256,6 +258,48 @@ def _transition(strategy_id: str, action: str, note: Optional[str]) -> Workbench
 # ============================================================================
 
 
+def _apply_adaptations(review: Any, strategies: list[dict[str, Any]]) -> dict[str, Any]:
+    """应用复盘输出到策略参数 (第三圈).
+
+    对每条策略: 用当前 params 计算自适应变更, 应用并记录到 adaptation_history.
+    幂等: 无变更时原样返回. 持久化失败不阻断 (下次 GET 重试).
+    """
+    from src.strategy.review_engine import compute_adaptations
+
+    adaptations: list[dict[str, Any]] = []
+    with _lock:
+        changed = False
+        for strategy in strategies:
+            params = dict(strategy.get("params") or {})
+            params.setdefault("exposure_multiplier", 1.0)
+            computed = compute_adaptations(review, params)
+            if not computed:
+                continue
+            for a in computed:
+                params[a.param] = a.to_value
+                adaptations.append(a.to_dict())
+                history = list(strategy.get("adaptation_history", []))
+                history.append(
+                    {
+                        "param": a.param,
+                        "from_value": a.from_value,
+                        "to_value": a.to_value,
+                        "reason": a.reason,
+                        "at": a.at,
+                    }
+                )
+                strategy["adaptation_history"] = history[-50:]
+            strategy["params"] = params
+            strategy["updated_at"] = _now_iso()
+            changed = True
+        if changed:
+            try:
+                _write_strategies(strategies)
+            except OSError as exc:
+                logger.warning("workbench: adaptation persist failed: %s", exc)
+    return {"strategies": strategies, "adaptations": adaptations}
+
+
 def _load_autopilot_status() -> AutopilotStatusResponse:
     """聚合 autopilot 只读状态 (复用 autopilot_routes 的 loader)."""
     from src.api.autopilot_routes import AutopilotConfigSummary
@@ -311,7 +355,7 @@ def register_workbench_routes(
     )
     async def workbench_summary() -> WorkbenchResponse:
         """聚合视图: 策略状态机 + combo 研究/模拟 + autopilot 执行 + 复盘反馈."""
-        strategies = [WorkbenchStrategy(**s) for s in _read_strategies()]
+        raw_strategies = _read_strategies()
         try:
             autopilot = _load_autopilot_status()
         except Exception:  # noqa: BLE001 — 执行层不可用不拖垮工作台
@@ -328,22 +372,39 @@ def register_workbench_routes(
             logger.warning("workbench: combo aggregation failed", exc_info=True)
             combo = ComboSummary()
         try:
-            # Loop Engineering 第一圈闭环: 复盘引擎 (体检 + 假设自动流转)
-            from src.strategy.review_engine import compute_review
+            # Loop Engineering 第一圈: 复盘引擎 (体检 + 假设自动流转)
+            from src.strategy.review_engine import compute_adaptations, compute_review
 
             review = compute_review(
                 combo_state_path=_COMBO_RUNTIME_ROOT / "state.json",
                 metrics_path=_COMBO_RUNTIME_ROOT / "backtest_metrics.json",
                 hypotheses_path=Path.home() / ".vibe-trading" / "hypotheses.json",
-            ).to_dict()
+            )
+            # 第三圈: 参数自适应 — 应用复盘输出到策略参数
+            applied = _apply_adaptations(review, raw_strategies)
+            review.adaptations.extend(applied["adaptations"])
+            raw_strategies = applied["strategies"]
+            # 第二圈: 变体生成 — 已验证基策略自动产下一代实验候选
+            try:
+                from src.hypotheses.registry import HypothesisRegistry
+                from src.strategy.variant_generator import generate_variants
+
+                variants = generate_variants(
+                    HypothesisRegistry(Path.home() / ".vibe-trading" / "hypotheses.json"),
+                    max_new=2,
+                )
+                review.variants = variants
+            except Exception:  # noqa: BLE001
+                logger.warning("workbench: variant generation failed", exc_info=True)
+            review_dict = review.to_dict()
         except Exception:  # noqa: BLE001
             logger.warning("workbench: review engine failed", exc_info=True)
-            review = {}
+            review_dict = {}
         return WorkbenchResponse(
-            strategies=strategies,
+            strategies=[WorkbenchStrategy(**s) for s in raw_strategies],
             combo=combo,
             autopilot=autopilot,
-            review=review,
+            review=review_dict,
             updated_at=_now_iso(),
         )
 
