@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ComponentType } from "react";
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { Layout } from "@/components/layout/Layout";
 
 const Home = lazy(() => import("@/pages/Home").then((m) => ({ default: m.Home })));
@@ -16,8 +16,9 @@ const Settings = lazy(() =>
 const Runtime = lazy(() =>
   import("@/pages/Runtime").then((m) => ({ default: m.Runtime })),
 );
-const Autopilot = lazy(() =>
-  import("@/pages/Autopilot").then((m) => ({ default: m.Autopilot })),
+// /combo 与 /autopilot 已合并进 /workbench (策略流水线工作台), 路由保留重定向.
+const Workbench = lazy(() =>
+  import("@/pages/Workbench").then((m) => ({ default: m.Workbench })),
 );
 const Scheduled = lazy(() =>
   import("@/pages/Scheduled").then((m) => ({ default: m.Scheduled })),
@@ -36,12 +37,6 @@ const OptionsLab = lazy(() =>
 );
 const PortfolioStudio = lazy(() =>
   import("@/pages/PortfolioStudio").then((m) => ({ default: m.PortfolioStudio })),
-);
-const Combo = lazy(() =>
-  import("@/pages/Combo").then((m) => ({ default: m.Combo })),
-);
-const Workbench = lazy(() =>
-  import("@/pages/Workbench").then((m) => ({ default: m.Workbench })),
 );
 
 function PageLoader() {
@@ -68,7 +63,7 @@ export const router = createBrowserRouter([
       { path: "/about", element: wrap(Home) },
       { path: "/agent", element: wrap(Agent) },
       { path: "/runtime", element: wrap(Runtime) },
-      { path: "/autopilot", element: wrap(Autopilot) },
+      { path: "/autopilot", element: <Navigate to="/workbench" replace /> },
       { path: "/scheduled", element: wrap(Scheduled) },
       { path: "/reports", element: wrap(Reports) },
       { path: "/settings", element: wrap(Settings) },
@@ -82,7 +77,8 @@ export const router = createBrowserRouter([
       { path: "/alpha-zoo/:alphaId", element: wrap(AlphaZoo) },
       { path: "/options-lab", element: wrap(OptionsLab) },
       { path: "/portfolio-studio", element: wrap(PortfolioStudio) },
-      { path: "/combo", element: wrap(Combo) },
+      { path: "/combo", element: <Navigate to="/workbench" replace /> },
+      { path: "/autopilot", element: <Navigate to="/workbench" replace /> },
       { path: "/workbench", element: wrap(Workbench) },
     ],
   },
