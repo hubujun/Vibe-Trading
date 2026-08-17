@@ -122,7 +122,9 @@ def build_signal(strategy: dict) -> dict:
         return {'error': 'panel 数据不足'}
     volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
 
-    # 因子合成: Σ w_i × zscore(factor_i), 缺失因子跳过 (权重重归一)
+    # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
+    from src.strategy.variant_backtester import ACADEMIC_MODULES
+
     score = None
     total_w = 0.0
     for fid in factors:
@@ -135,7 +137,9 @@ def build_signal(strategy: dict) -> dict:
         except Exception as e:
             print(f'  警告: 因子 {fid} compute 失败: {str(e)[:60]}')
             continue
-        f = _row_zscore(f.reindex(close_df.index))
+        f = f.reindex(close_df.index)
+        if fid not in ACADEMIC_MODULES:
+            f = _row_zscore(f)
         w = weights.get(fid, 1.0 / len(factors))
         score = f * w if score is None else score.add(f * w, fill_value=0)
         total_w += w
