@@ -13,6 +13,7 @@ from pathlib import Path
 
 from src.strategy.review_engine import (
     MIN_TRADES,
+    StrategyReview,
     compute_review,
     _consecutive_losses,
     _reconstruct_nav,
@@ -240,3 +241,70 @@ class TestHelpers:
         assert abs(navs[0] - 1.0) < 1e-9
         assert abs(navs[1] - 1.1) < 1e-9
         assert abs(navs[2] - 1.045) < 1e-9
+
+
+class TestAdaptations:
+    """第三圈: 参数自适应规则."""
+
+    def test_dd_breach_halves_exposure(self) -> None:
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(
+            vs_backtest=ReviewVsBacktest(dd_breach=True, current_dd=20.0, backtest_max_dd=-10.62)
+        )
+        adaptations = compute_adaptations(review, {"exposure_multiplier": 1.0})
+
+        assert len(adaptations) == 1
+        assert adaptations[0].param == "exposure_multiplier"
+        assert adaptations[0].from_value == 1.0
+        assert adaptations[0].to_value == 0.5
+
+    def test_consecutive_losses_halves_exposure(self) -> None:
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(
+            vs_backtest=ReviewVsBacktest(consecutive_losses=3, sample_sufficient=True)
+        )
+        adaptations = compute_adaptations(review, {"exposure_multiplier": 0.5})
+
+        assert adaptations[0].from_value == 0.5
+        assert adaptations[0].to_value == 0.25  # 0.5*0.5
+
+    def test_exposure_floor(self) -> None:
+        from src.strategy.review_engine import (
+            EXPOSURE_MIN,
+            ReviewVsBacktest,
+            compute_adaptations,
+        )
+
+        review = StrategyReview(
+            vs_backtest=ReviewVsBacktest(dd_breach=True, current_dd=30.0, backtest_max_dd=-10.0)
+        )
+        adaptations = compute_adaptations(review, {"exposure_multiplier": EXPOSURE_MIN})
+
+        assert adaptations == []  # 已在下限, 不再降
+
+    def test_outperforming_recovers_exposure(self) -> None:
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(
+            vs_backtest=ReviewVsBacktest(
+                sample_sufficient=True, outperforming=True, paper_trades=20
+            )
+        )
+        adaptations = compute_adaptations(review, {"exposure_multiplier": 0.5})
+
+        assert adaptations[0].from_value == 0.5
+        assert adaptations[0].to_value == 0.6
+
+    def test_no_adaptation_when_healthy(self) -> None:
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest(sample_sufficient=True))
+        assert compute_adaptations(review, {"exposure_multiplier": 1.0}) == []
+
+    def test_review_dict_includes_adaptations_and_variants(self) -> None:
+        review = StrategyReview()
+        d = review.to_dict()
+        assert d["adaptations"] == []
+        assert d["variants"] == []
