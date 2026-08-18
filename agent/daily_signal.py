@@ -77,7 +77,9 @@ def fetch_okx_daily(symbol: str, days: int = DAYS) -> pd.DataFrame:
     idx = pd.to_datetime([int(x[0]) for x in rows], unit='ms')
     return pd.DataFrame(
         {'close': [float(x[4]) for x in rows],
-         'volume': [float(x[5]) for x in rows]},
+         'volume': [float(x[5]) for x in rows],
+         'high': [float(x[2]) for x in rows],
+         'low': [float(x[3]) for x in rows]},
         index=idx,
     )
 
