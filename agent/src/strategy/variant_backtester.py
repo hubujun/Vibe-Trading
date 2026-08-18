@@ -186,7 +186,9 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
     df = df.set_index("ts")
     df["close"] = df["close"].astype(float)
     df["volume"] = df["vol"].astype(float)
-    return df[["close", "volume"]]
+    df["high"] = df["high"].astype(float)
+    df["low"] = df["low"].astype(float)
+    return df[["close", "volume", "high", "low"]]
 
 
 def fetch_panel() -> dict[str, pd.DataFrame] | None:
