@@ -21,6 +21,8 @@ __all__ = ["AutopilotConfig", "load_autopilot_config", "SCALE_TIERS"]
 #: Default trading pairs for the crypto autopilot loop. A broad universe
 #: gives the factor screen a cross-section to test consistency over;
 #: mined factors must hold across assets, not just one pair.
+#: (统一为 OKB 版 — 与策略引擎 combo/daily_signal 的 universe 一致;
+#:  OKB 为 OKX 平台币, 老胡交易生态相关)
 _DEFAULT_PAIRS: tuple[str, ...] = (
     "BTC-USDT",
     "ETH-USDT",
@@ -31,7 +33,7 @@ _DEFAULT_PAIRS: tuple[str, ...] = (
     "ADA-USDT",
     "AVAX-USDT",
     "LINK-USDT",
-    "LTC-USDT",
+    "OKB-USDT",
 )
 
 
