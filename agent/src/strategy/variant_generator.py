@@ -132,8 +132,8 @@ def _factor_level_variants() -> list[dict[str, Any]]:
     """从因子池生成因子级变体 (三因子: BAB + high52w + X).
 
     - 学术池 (ACADEMIC_POOL): 文献因子, 代码库固定资产, 恒可用
-    - 挖掘池 (FACTOR_POOL): zoo 实际存在且未退役 (未被过拟合三关刷掉) 的因子
-    挖掘引擎产出新因子后, 这里自动出现新候选, 形成 挖掘 → 组合 的通路.
+    - 挖掘池: FACTOR_POOL 固定 5 个优先 + zoo 全部未退役候选自动补充
+      (矿机每挖出/复活一个新因子, 这里自动出现新候选 — 挖掘 → 组合 通路)
     """
     zoo_ids = _zoo_factor_ids()
     retired_ids = _retired_factor_ids()
@@ -146,7 +146,8 @@ def _factor_level_variants() -> list[dict[str, Any]]:
                 "weights": {"BAB": 1 / 3, "high52w": 1 / 3, fid: 1 / 3},
             }
         )
-    for fid in FACTOR_POOL:
+    mined_pool = list(FACTOR_POOL) + sorted(zoo_ids - set(FACTOR_POOL))
+    for fid in mined_pool:
         if fid in zoo_ids and fid not in retired_ids:
             variants.append(
                 {
