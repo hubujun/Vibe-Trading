@@ -479,6 +479,11 @@ def register_workbench_routes(
                     m = backtest_cache[sd]
                     baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
                     s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
+                elif "_BASE_" in backtest_cache:
+                    # 基策略自身: 用当前 universe 动态基准 (variant_backtester 产出)
+                    m = backtest_cache["_BASE_"]
+                    baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
+                    s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
                 else:
                     s["strategy_backtest"] = {}
                 try:
