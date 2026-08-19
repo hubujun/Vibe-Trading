@@ -34,6 +34,11 @@ _DEFAULT_PAIRS: tuple[str, ...] = (
     "AVAX-USDT",
     "LINK-USDT",
     "OKB-USDT",
+    "LTC-USDT",
+    "DOT-USDT",
+    "UNI-USDT",
+    "APT-USDT",
+    "ARB-USDT",
 )
 
 

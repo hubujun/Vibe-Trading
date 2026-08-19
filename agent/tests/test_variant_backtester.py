@@ -193,3 +193,24 @@ class TestRunPipeline:
         )
 
         assert result["backtested"] == []
+
+    def test_auto_seed_idempotent(self, tmp_path: Path, monkeypatch) -> None:
+        """晋升变体自动播种; 同 signal_definition 重复播种被去重跳过."""
+        from src.strategy import variant_backtester as vb
+
+        strategies_path = tmp_path / "strategies.json"
+        monkeypatch.setattr(vb, "_STRATEGIES_PATH", strategies_path)
+
+        sd = "combo_variant: factors=[BAB,high52w,testf] weights={BAB:0.33,high52w:0.33,testf:0.33} top_n=3 bot_n=3"
+        sid1 = vb._auto_seed_strategy(sd, "加入测试因子 testf")
+        assert sid1 and sid1.startswith("combo_")
+
+        data = json.loads(strategies_path.read_text(encoding="utf-8"))
+        assert len(data["strategies"]) == 1
+        assert data["strategies"][0]["phase"] == "paper"
+        assert data["strategies"][0]["signal_definition"] == sd
+        assert data["strategies"][0]["universe_size"] == len(vb.SYMBOLS)
+
+        # 幂等: 重复播种返回 None, 不新增
+        assert vb._auto_seed_strategy(sd, "again") is None
+        assert len(json.loads(strategies_path.read_text(encoding="utf-8"))["strategies"]) == 1

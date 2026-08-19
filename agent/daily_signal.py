@@ -17,7 +17,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
-           'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT']
+            'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT',
+            'LTC-USDT', 'DOT-USDT', 'UNI-USDT', 'APT-USDT', 'ARB-USDT']
 COST = 0.001
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
