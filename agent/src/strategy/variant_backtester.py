@@ -512,6 +512,14 @@ def _write_cache(path: Path, cache: dict[str, dict[str, Any]]) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    result = run_variant_backtests()
+    parser = argparse.ArgumentParser(description="变体自动回测 (Loop 进化)")
+    parser.add_argument(
+        "--max-per-run", type=int, default=20,
+        help="每轮最多回测的变体数 (积压多时可调大, 默认 20)",
+    )
+    args = parser.parse_args()
+    result = run_variant_backtests(max_per_run=args.max_per_run)
     print(json.dumps(result, ensure_ascii=False, indent=2))
