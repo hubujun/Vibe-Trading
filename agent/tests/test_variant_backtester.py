@@ -161,9 +161,10 @@ class TestRunPipeline:
 
         assert len(result["backtested"]) == 1
         assert result["backtested"][0]["metrics"]["annual"] is not None
-        # 缓存已写入
+        # 缓存已写入 (含动态基准 _BASE_)
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
-        assert len(cache) == 1
+        assert "_BASE_" in cache
+        assert len([k for k in cache if k.startswith("combo_variant")]) == 1
 
     def test_cached_variant_skipped(self, tmp_path: Path) -> None:
         hypo_path = tmp_path / "h.json"
