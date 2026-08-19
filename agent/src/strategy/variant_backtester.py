@@ -317,20 +317,59 @@ def save_backtest_cache(cache: dict[str, dict[str, Any]]) -> None:
 # ============================================================================
 
 
-def _promote_status(metrics: dict[str, Any]) -> str:
-    """晋升判定: 年化&夏普双超 + 回撤可控 → testing; 否则保持 exploring."""
+def _promote_status(metrics: dict[str, Any], base: dict[str, Any] | None = None) -> str:
+    """晋升判定: 年化&夏普双超 + 回撤可控 → testing; 否则保持 exploring.
+
+    base: 当前 universe 下的基策略回测基准 (默认硬编码 BASE_METRICS).
+    """
+    base = base or BASE_METRICS
     annual = metrics.get("annual")
     sharpe = metrics.get("sharpe")
     max_dd = metrics.get("max_dd")
     if annual is None or sharpe is None or max_dd is None:
         return "exploring"
     if (
-        annual > BASE_METRICS["annual"]
-        and sharpe > BASE_METRICS["sharpe"]
-        and max_dd > BASE_METRICS["max_dd"] * DD_TOLERANCE
+        annual > base["annual"]
+        and sharpe > base["sharpe"]
+        and max_dd > base["max_dd"] * DD_TOLERANCE
     ):
         return "testing"
     return "exploring"
+
+
+#: 基策略组合定义 (用于动态重算当前 universe 下的晋升基准)
+_BASE_SIGNAL = {
+    "factors": ["BAB", "high52w"],
+    "weights": {"BAB": 0.5, "high52w": 0.5},
+    "top_n": 3,
+    "bot_n": 3,
+}
+_BASE_CACHE_KEY = "_BASE_"
+
+
+def _load_base_metrics(cache: dict[str, dict[str, Any]], panel: dict[str, pd.DataFrame]) -> tuple[dict[str, Any], bool]:
+    """当前 universe 下基策略的回测基准 (缓存 _BASE_, universe 变化自动重算).
+
+    Returns:
+        (base_metrics, changed) — changed=True 表示基准本轮重算,
+        调用方需对已缓存变体重判晋升状态.
+    """
+    base = cache.get(_BASE_CACHE_KEY)
+    if base and base.get("universe_size") == len(SYMBOLS):
+        return base, False
+    m = backtest_variant(panel, _BASE_SIGNAL["factors"], _BASE_SIGNAL["weights"], 3, 3)
+    if "error" in m:
+        logger.warning("variant backtest: base metrics failed (%s), fallback hardcoded", m["error"])
+        return BASE_METRICS, False
+    base = {
+        "annual": m["annual"],
+        "sharpe": m["sharpe"],
+        "max_dd": m["max_dd"],
+        "universe_size": len(SYMBOLS),
+        "backtested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    cache[_BASE_CACHE_KEY] = base
+    return base, True
 
 
 # ============================================================================
@@ -425,16 +464,55 @@ def run_variant_backtests(
     registry = HypothesisRegistry(hypotheses_path)
     cache = load_backtest_cache() if cache_path == CACHE_PATH else _read_cache(cache_path)
 
+    # 动态晋升基准: 当前 universe 下基策略的回测 (universe 变化自动重算)
+    if panel is None:
+        panel = fetch_panel()
+    if panel is None:
+        return {"backtested": [], "promoted": [], "skipped": 0, "error": "panel fetch failed"}
+    base_metrics, base_changed = _load_base_metrics(cache, panel)
+
+    # 基准变化 → 已缓存变体重判晋升状态 (universe 变更后指标不再有效)
+    rejudged: list[dict[str, Any]] = []
+    if base_changed:
+        for h in registry.list():
+            sd = str(h.signal_definition)
+            if not sd.startswith("combo_variant:") or sd not in cache:
+                continue
+            m = cache[sd]
+            new_status = _promote_status(m, base_metrics)
+            if new_status == "testing" and str(h.status) == "exploring":
+                try:
+                    registry.update(
+                        h.hypothesis_id,
+                        status="testing",
+                        invalidation_notes=(
+                            f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                            f"universe 变更后重判 — 年化 {m.get('annual')}% / 夏普 {m.get('sharpe')} "
+                            f"双超新基准 ({base_metrics['annual']}%/{base_metrics['sharpe']})"
+                        ),
+                    )
+                    seeded = _auto_seed_strategy(sd, str(h.title))
+                    rejudged.append({
+                        "hypothesis_id": h.hypothesis_id,
+                        "title": h.title,
+                        "signal_definition": sd,
+                        "status": "testing",
+                        "seeded_strategy_id": seeded,
+                    })
+                except Exception:  # noqa: BLE001
+                    logger.warning("variant backtest: rejudge promote failed for %s", h.hypothesis_id)
+
     candidates = [
         h for h in registry.list()
         if str(h.status) == "exploring" and str(h.signal_definition).startswith("combo_variant:")
         and h.signal_definition not in cache
     ]
     if not candidates:
-        return {"backtested": [], "promoted": [], "skipped": 0}
-
-    if panel is None:
-        panel = fetch_panel()
+        if cache_path == CACHE_PATH:
+            save_backtest_cache(cache)
+        else:
+            _write_cache(cache_path, cache)
+        return {"backtested": [], "promoted": [], "rejudged": rejudged, "skipped": 0}
     if panel is None:
         return {"backtested": [], "promoted": [], "skipped": len(candidates), "error": "panel 数据不足"}
 
@@ -455,7 +533,7 @@ def run_variant_backtests(
             continue
         metrics["backtested_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         cache[str(hyp.signal_definition)] = metrics
-        status = _promote_status(metrics)
+        status = _promote_status(metrics, base_metrics)
         record = {
             "hypothesis_id": hyp.hypothesis_id,
             "title": hyp.title,
@@ -495,7 +573,7 @@ def run_variant_backtests(
         save_backtest_cache(cache)
     else:
         _write_cache(cache_path, cache)
-    return {"backtested": backtested, "promoted": promoted, "skipped": max(0, len(candidates) - max_per_run)}
+    return {"backtested": backtested, "promoted": promoted, "rejudged": rejudged, "skipped": max(0, len(candidates) - max_per_run)}
 
 
 def _read_cache(path: Path) -> dict[str, dict[str, Any]]:
