@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -54,10 +55,12 @@ HOME = Path.home()
 CACHE_PATH = HOME / ".vibe-trading" / "runs" / "paper_combo" / "variant_backtests.json"
 HYPOTHESES_PATH = HOME / ".vibe-trading" / "hypotheses.json"
 
-#: 币种 universe (与 combo_backtest/daily_signal 一致)
+#: 币种 universe (与 daily_signal/autopilot 一致) — 15 个主流+次主流 USDT 对
+#: 覆盖公链/平台币/DeFi/预言机/meme 多板块, 均 OKX 永续 + 历史数据够 800 天回测
 SYMBOLS = [
     "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT",
     "DOGE-USDT", "OKB-USDT", "ADA-USDT", "AVAX-USDT", "LINK-USDT",
+    "LTC-USDT", "DOT-USDT", "UNI-USDT", "APT-USDT", "ARB-USDT",
 ]
 DAYS = 800
 COST = 0.001
@@ -335,6 +338,72 @@ def _promote_status(metrics: dict[str, Any]) -> str:
 # ============================================================================
 
 
+# ============================================================================
+# 自动播种: 晋升变体 → 并行策略 (与 workbench_routes 播种端点同结构)
+# ============================================================================
+
+
+#: 策略注册表路径 (workbench_routes 同源; 测试可 monkeypatch 注入)
+_STRATEGIES_PATH = Path.home() / ".vibe-trading" / "workbench" / "strategies.json"
+
+
+def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
+    """晋升的变体自动播种为新策略并直接进入模拟盘 (phase=paper).
+
+    - strategies.json 按 signal_definition 去重 (已播种则跳过)
+    - 独立 run_dir + 初始 state.json (nav=1.0), 次日 07:00 cron 自动跑信号
+    """
+    import json as _json
+
+    p = _STRATEGIES_PATH
+    try:
+        data = _json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        data = {"strategies": []}
+    sids = [str(s.get("signal_definition", "")) for s in data.get("strategies", [])]
+    if signal_definition in sids:
+        return None
+    parsed = parse_signal_definition(signal_definition)
+    if parsed is None:
+        return None
+    sid = "combo_" + hashlib.md5(signal_definition.encode()).hexdigest()[:8]
+    run_dir = Path.home() / ".vibe-trading" / "runs" / f"paper_{sid}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    (run_dir / "state.json").write_text(
+        _json.dumps(
+            {
+                "strategy_id": sid,
+                "nav": 1.0,
+                "trades": [],
+                "started_at": now,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    data.setdefault("strategies", []).append(
+        {
+            "strategy_id": sid,
+            "name": str(name)[:40],
+            "phase": "paper",
+            "factors": parsed["factors"],
+            "weights": parsed["weights"],
+            "top_n": parsed["top_n"],
+            "bot_n": parsed["bot_n"],
+            "universe_size": len(SYMBOLS),
+            "rebalance": "日频 · 每日 07:00",
+            "signal_definition": signal_definition,
+            "run_dir": str(run_dir),
+            "created_at": now,
+            "updated_at": None,
+        }
+    )
+    p.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return sid
+
+
 def run_variant_backtests(
     *,
     max_per_run: int = 3,
@@ -407,6 +476,14 @@ def run_variant_backtests(
                     ),
                 )
                 promoted.append(record)
+                # 自动播种为并行策略并直接进模拟盘 (signal_definition 去重)
+                seeded = _auto_seed_strategy(str(hyp.signal_definition), str(hyp.title))
+                if seeded:
+                    record["seeded_strategy_id"] = seeded
+                    logger.info(
+                        "variant backtest: auto-seeded %s → %s (paper)",
+                        hyp.hypothesis_id, seeded,
+                    )
             except Exception:  # noqa: BLE001
                 logger.warning("variant backtest: promote failed for %s", hyp.hypothesis_id)
         logger.info(
