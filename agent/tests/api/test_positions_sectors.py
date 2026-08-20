@@ -543,6 +543,55 @@ def test_shared_executor_created_once_and_bounded(tmp_path: Path, monkeypatch) -
 
 
 # ============================================================================
+# Endpoint: bounded contract for large books
+# ============================================================================
+
+
+def test_large_symbol_list_caps_network_lookups(tmp_path: Path, monkeypatch) -> None:
+    total = 250
+    symbols = [f"6{i:05d}.SH" for i in range(total)]
+    _make_run(
+        tmp_path,
+        "timestamp," + ",".join(symbols),
+        ["2026-08-01T00:00:00," + ",".join(["0.004"] * total)],
+    )
+    client = _client(tmp_path, monkeypatch)
+
+    def any_secid(symbol: str) -> str | None:
+        return f"1.{symbol.split('.')[0]}"
+
+    def any_get_json(url: str, *, params: dict) -> dict:
+        code = params["secid"].split(".")[1]
+        return {
+            "data": {
+                "diff": {
+                    "0": {"f12": code, "f13": 1, "f14": "S"},
+                    "1": {"f12": "BK0001", "f13": 90, "f14": "银行Ⅱ"},
+                }
+            }
+        }
+
+    with patch(
+        "src.tools.sector_tool.resolve_secid", side_effect=any_secid
+    ), patch("src.tools.sector_tool.get_json", side_effect=any_get_json) as get:
+        response = client.get(f"/runs/{RUN_ID}/positions/sectors")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_symbols"] == total
+    assert payload["symbol_limit"] == 200
+    # Bounded: the capped tail never reaches the network.
+    assert get.call_count == 200
+    # Asset-class grouping still covers every symbol.
+    assert len(payload["symbols"]) == total
+    assert payload["symbols"][symbols[0]]["industry"] == "银行Ⅱ"
+    assert payload["symbols"][symbols[-1]]["industry"] is None
+    # The capped tail degrades to unresolved instead of aborting.
+    assert len(payload["unresolved"]) == total - 200
+    assert payload["unresolved"] == symbols[200:]
+
+
+# ============================================================================
 # resolve_industry_board helper
 # ============================================================================
 
