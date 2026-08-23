@@ -185,7 +185,9 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
     df = pd.DataFrame(rows, columns=[
         "ts", "open", "high", "low", "close", "vol", "volCcy", "volCcyQuote", "confirm",
     ])
-    df["ts"] = pd.to_datetime(df["ts"].astype(int), unit="ms")
+    # OKX candle ts 为北京时间 00:00 (UTC+8), 归一到北京日期 (与 daily_signal 一致)
+    df["ts"] = pd.to_datetime(df["ts"].astype(int), unit="ms") + pd.Timedelta(hours=8)
+    df["ts"] = df["ts"].dt.normalize()
     df = df.set_index("ts")
     df["close"] = df["close"].astype(float)
     df["volume"] = df["vol"].astype(float)
