@@ -75,7 +75,10 @@ def fetch_okx_daily(symbol: str, days: int = DAYS) -> pd.DataFrame:
     if not all_rows:
         return pd.DataFrame(columns=['close', 'volume'])
     rows = sorted(all_rows, key=lambda x: int(x[0]))[-days:]
-    idx = pd.to_datetime([int(x[0]) for x in rows], unit='ms')
+    # OKX candle ts 为北京时间 00:00 (UTC+8), 归一到北京日期 00:00
+    # (否则 naive UTC 解析 .date() 少一天, 且日期切片匹配不到 16:00 index)
+    idx = pd.to_datetime([int(x[0]) for x in rows], unit='ms') + pd.Timedelta(hours=8)
+    idx = idx.normalize()
     return pd.DataFrame(
         {'close': [float(x[4]) for x in rows],
          'volume': [float(x[5]) for x in rows],
