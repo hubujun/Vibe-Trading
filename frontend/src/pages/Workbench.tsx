@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
+  ChevronDown,
   ChevronRight,
   Cpu,
   FlaskConical,
@@ -197,6 +198,8 @@ export function Workbench() {
   const [selectedId, setSelectedId] = useState<string>("");
   // 阶段浏览: 中间显示当前查看的阶段, 左右相邻可点击切换 (默认跟随策略当前阶段)
   const [viewStage, setViewStage] = useState<string>("research");
+  // 详情面板折叠态: 研究/执行/假设注册表 默认收起, 保持流水线主链清晰
+  const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({ research: false, exec: false, registry: false });
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
@@ -788,6 +791,108 @@ export function Workbench() {
             </div>
           </div>
 
+
+          {/* 复盘建议: 流水线闭环输出 — 主链最后一环 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-xl border bg-card p-4">
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-400" />
+                复盘建议（Loop 反馈） <Term k="reviewAdvice" />
+                {review?.reviewed_at && (
+                  <span className="text-xs font-normal text-muted-foreground">
+                    · {String(review.reviewed_at).replace("T", " ").slice(0, 16)}
+                  </span>
+                )}
+              </h2>
+              {review?.recommendations?.length ? (
+                <div className="space-y-2">
+                  {review.recommendations.map((r, i) => (
+                    <div
+                      key={`${r.level}-${i}`}
+                      className={cn(
+                        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
+                        r.level === "critical" && "border-rose-500/30 bg-rose-500/5 text-rose-300",
+                        r.level === "warn" && "border-amber-500/30 bg-amber-500/5 text-amber-300",
+                        r.level === "info" && "border-border/60 bg-muted/30 text-muted-foreground",
+                      )}
+                    >
+                      <span className="mt-0.5 shrink-0">
+                        {r.level === "critical" ? "⛔" : r.level === "warn" ? "⚠️" : "ℹ️"}
+                      </span>
+                      <span>{r.text}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">复盘引擎数据不可用</div>
+              )}
+              {review?.hypothesis_updates?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">本轮假设自动流转</div>
+                  <div className="space-y-2">
+                    {review.hypothesis_updates.map((u, i) => (
+                      <div key={`${u.hypothesis_id}-${i}`} className="rounded-lg border border-border/50 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{u.title}</span>
+                          <span className="ml-auto shrink-0 font-mono text-muted-foreground">{u.hypothesis_id}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
+                          <span className="rounded bg-muted px-1.5 py-0.5">{u.from_status}</span>
+                          <ChevronRight className="h-3 w-3" />
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">{u.to_status}</span>
+                          <span className="truncate">· {u.reason}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              {review?.adaptations?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">参数自适应（已应用）</div>
+                  <div className="space-y-2">
+                    {review.adaptations.map((a, i) => (
+                      <div key={`${a.param}-${i}`} className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold text-cyan-300">{a.param}</span>
+                          <span className="font-mono">{a.from_value.toFixed(2)} → {a.to_value.toFixed(2)}</span>
+                          <span className="truncate text-muted-foreground">· {a.reason}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+              {review?.variants?.length ? (
+                <>
+                  <div className="text-xs text-muted-foreground mt-4 mb-2">🧬 下一代实验候选（已进 exploring）</div>
+                  <div className="space-y-2">
+                    {review.variants.map(v => (
+                      <div key={v.hypothesis_id} className="rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{v.title}</span>
+                          <span className="ml-auto shrink-0 rounded bg-purple-500/20 px-1.5 py-0.5 text-purple-300">{v.status}</span>
+                        </div>
+                        <div className="mt-1 font-mono text-[10px] text-muted-foreground truncate">{v.signal_definition}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+          </div>
+
+          {/* 研究详情 折叠面板 */}
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <button
+              onClick={() => setOpenDetails(d => ({ ...d, research: !d.research }))}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
+              <span className="flex items-center gap-2"><FlaskConical className="h-4 w-4 text-muted-foreground" />研究详情<span className="text-[11px] font-normal text-muted-foreground">回测对比 · 因子 IC · 因子分层</span></span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.research && "rotate-180")} />
+            </button>
+            {openDetails.research && (
+              <div className="px-4 pb-4">
           {/* Backtest + IC */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="rounded-xl border bg-card p-4">
@@ -1109,6 +1214,20 @@ export function Workbench() {
             )}
           </div>
 
+              </div>
+            )}
+          </div>
+
+          {/* 执行详情 折叠面板 */}
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <button
+              onClick={() => setOpenDetails(d => ({ ...d, exec: !d.exec }))}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
+              <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" />执行详情<span className="text-[11px] font-normal text-muted-foreground">执行状态 · 生命周期 · 执行明细</span></span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.exec && "rotate-180")} />
+            </button>
+            {openDetails.exec && (
+              <div className="px-4 pb-4">
           {/* 执行层状态 + 生命周期记录 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="rounded-xl border bg-card p-4">
@@ -1253,96 +1372,20 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* Loop 反馈: 推荐动作 + 假设流转 */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-400" />
-                复盘建议（Loop 反馈） <Term k="reviewAdvice" />
-                {review?.reviewed_at && (
-                  <span className="text-xs font-normal text-muted-foreground">
-                    · {String(review.reviewed_at).replace("T", " ").slice(0, 16)}
-                  </span>
-                )}
-              </h2>
-              {review?.recommendations?.length ? (
-                <div className="space-y-2">
-                  {review.recommendations.map((r, i) => (
-                    <div
-                      key={`${r.level}-${i}`}
-                      className={cn(
-                        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
-                        r.level === "critical" && "border-rose-500/30 bg-rose-500/5 text-rose-300",
-                        r.level === "warn" && "border-amber-500/30 bg-amber-500/5 text-amber-300",
-                        r.level === "info" && "border-border/60 bg-muted/30 text-muted-foreground",
-                      )}
-                    >
-                      <span className="mt-0.5 shrink-0">
-                        {r.level === "critical" ? "⛔" : r.level === "warn" ? "⚠️" : "ℹ️"}
-                      </span>
-                      <span>{r.text}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">复盘引擎数据不可用</div>
-              )}
-              {review?.hypothesis_updates?.length ? (
-                <>
-                  <div className="text-xs text-muted-foreground mt-4 mb-2">本轮假设自动流转</div>
-                  <div className="space-y-2">
-                    {review.hypothesis_updates.map((u, i) => (
-                      <div key={`${u.hypothesis_id}-${i}`} className="rounded-lg border border-border/50 px-3 py-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium truncate">{u.title}</span>
-                          <span className="ml-auto shrink-0 font-mono text-muted-foreground">{u.hypothesis_id}</span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
-                          <span className="rounded bg-muted px-1.5 py-0.5">{u.from_status}</span>
-                          <ChevronRight className="h-3 w-3" />
-                          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">{u.to_status}</span>
-                          <span className="truncate">· {u.reason}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-              {review?.adaptations?.length ? (
-                <>
-                  <div className="text-xs text-muted-foreground mt-4 mb-2">参数自适应（已应用）</div>
-                  <div className="space-y-2">
-                    {review.adaptations.map((a, i) => (
-                      <div key={`${a.param}-${i}`} className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 px-3 py-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-semibold text-cyan-300">{a.param}</span>
-                          <span className="font-mono">{a.from_value.toFixed(2)} → {a.to_value.toFixed(2)}</span>
-                          <span className="truncate text-muted-foreground">· {a.reason}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-              {review?.variants?.length ? (
-                <>
-                  <div className="text-xs text-muted-foreground mt-4 mb-2">🧬 下一代实验候选（已进 exploring）</div>
-                  <div className="space-y-2">
-                    {review.variants.map(v => (
-                      <div key={v.hypothesis_id} className="rounded-lg border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium truncate">{v.title}</span>
-                          <span className="ml-auto shrink-0 rounded bg-purple-500/20 px-1.5 py-0.5 text-purple-300">{v.status}</span>
-                        </div>
-                        <div className="mt-1 font-mono text-[10px] text-muted-foreground truncate">{v.signal_definition}</div>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
+              </div>
+            )}
+          </div>
 
-            {/* 假设注册表 (复盘素材) */}
+          {/* 假设注册表 折叠面板 */}
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <button
+              onClick={() => setOpenDetails(d => ({ ...d, registry: !d.registry }))}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
+              <span className="flex items-center gap-2"><Layers className="h-4 w-4 text-muted-foreground" />假设注册表<span className="text-[11px] font-normal text-muted-foreground">全部假设状态档案</span></span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.registry && "rotate-180")} />
+            </button>
+            {openDetails.registry && (
+              <div className="px-4 pb-4">
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-purple-400" />
@@ -1388,7 +1431,10 @@ export function Workbench() {
                 {!hypotheses.length && <div className="text-xs text-muted-foreground">暂无假设记录</div>}
               </div>
             </div>
+              </div>
+            )}
           </div>
+
         </>
       )}
     </div>
