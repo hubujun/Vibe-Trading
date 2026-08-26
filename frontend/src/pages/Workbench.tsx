@@ -159,6 +159,13 @@ const TERMS: Record<string, string> = {
   phasePaper: "模拟：模拟盘用真实行情记账（含 0.1% 交易成本和永续资金费），积累 20 笔调仓后复盘才有统计意义",
   phaseLive: "执行：autopilot 执行层。当前为纸面账户模拟执行（paper_trading），未接真实交易所",
   phaseReview: "复盘：每日体检模拟盘表现（vs 回测 / 回撤超限 / 信号新鲜度），输出建议并决定下一圈去向（回组合迭代 / 回研究回炉）",
+  navTrack: "模拟盘净值追踪：该策略模拟盘账户的净值曲线，每个调仓点更新。净值从 1.0 起步，>1 赚钱 <1 亏钱",
+  factorTiers: "因子分层：学术(文献因子) → 挖掘(factor miner 自动挖) → 组合(变体拼装)。下层供上层，每层有自己的 IC 表和状态标注",
+  autopilotStatus: "执行层状态（Autopilot）：策略信号的实际执行引擎。当前 paper_trading = 纸面模拟执行，未接真实交易所",
+  lifecycleLog: "生命周期记录：策略阶段变更的历史流水（挖掘→组合→研究→模拟→执行→复盘 的状态迁移记录）",
+  execDetail: "执行明细（纸面账户）：纸面账户的交易统计（胜率/PnL/夏普/回撤）+ 当前持仓。样本少时数字仅供参考",
+  reviewAdvice: "复盘建议（Loop 反馈）：复盘引擎给策略的体检报告和建议（下一圈去组合迭代还是回研究回炉），每日 08:30 更新",
+  hypothesisReg: "假设注册表：所有假设（学术因子/挖掘因子/变体组合）的状态档案。exploring→testing→validated 是晋升路径，rejected 是被否决的",
   lifecycle: "生命周期：因子在矿机-验证体系里的状态。活跃=已过三关在交易，退役=被三关拒绝，候选=待审判",
   tradeCount: "交易数：该因子实际参与的交易笔数，样本越多统计越可信",
   signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
@@ -739,7 +746,7 @@ export function Workbench() {
             </div>
 
             <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3">模拟盘净值追踪</h2>
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">模拟盘净值追踪 <Term k="navTrack" /></h2>
               {navChart ? (
                 <div id="workbench-nav-chart" className="h-[220px] w-full" />
               ) : (
@@ -854,7 +861,7 @@ export function Workbench() {
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <h2 className="text-sm font-semibold flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-amber-400" />
-                因子分层
+                因子分层 <Term k="factorTiers" />
               </h2>
               <div className="flex rounded-lg border border-border/60 overflow-hidden text-xs font-medium">
                 {[
@@ -1107,7 +1114,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                执行层状态（Autopilot）
+                执行层状态（Autopilot） <Term k="autopilotStatus" />
               </h2>
               {autopilot ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
@@ -1150,7 +1157,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <History className="h-4 w-4 text-purple-400" />
-                生命周期记录
+                生命周期记录 <Term k="lifecycleLog" />
               </h2>
               {history.length ? (
                 <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
@@ -1175,7 +1182,7 @@ export function Workbench() {
           <div className="rounded-xl border bg-card p-4">
             <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <Receipt className="h-4 w-4 text-cyan-400" />
-              执行明细（纸面账户）
+              执行明细（纸面账户） <Term k="execDetail" />
             </h2>
             {data?.autopilot_performance ? (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
@@ -1251,7 +1258,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-amber-400" />
-                复盘建议（Loop 反馈）
+                复盘建议（Loop 反馈） <Term k="reviewAdvice" />
                 {review?.reviewed_at && (
                   <span className="text-xs font-normal text-muted-foreground">
                     · {String(review.reviewed_at).replace("T", " ").slice(0, 16)}
@@ -1339,7 +1346,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-purple-400" />
-                假设注册表
+                假设注册表 <Term k="hypothesisReg" />
               </h2>
               <div className="grid grid-cols-1 gap-3">
                 {hypotheses.map(h => {
