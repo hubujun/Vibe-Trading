@@ -1,36 +1,31 @@
-"""Volume spike reversal: high relative volume combined with recent price declines."""
+"""crypto_mined_volume_spike_reversal: volume-spike short-term reversal."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import delta, rank, safe_div, signed_power, ts_mean, ts_rank
+from src.factors.base import delta, rank, safe_div, ts_mean
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_spike_reversal",
-    "nickname": "Volume Spike Reversal",
+    "nickname": "volume_spike_reversal",
     "theme": ["volume"],
-    "formula_latex": r"\mathrm{rank}\left( \mathrm{ts\_rank}\left( \left(\frac{V_t}{\mathrm{mean}_{20}(V)}\right)^2, 20\right) \cdot \mathrm{rank}(-\Delta P_t) \right)",
+    "formula_latex": r"-\mathrm{rank}\left(\frac{V_t}{\mathrm{mean}_{20}(V)}\right)\cdot\mathrm{rank}\left(\frac{P_t-P_{t-1}}{P_{t-1}}\right)",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 3,
-    "min_warmup_bars": 39,
-    "notes": "Targets short-term reversal after volume spikes: high relative volume plus a recent price drop ranks highest.",
+    "decay_horizon": 1,
+    "min_warmup_bars": 21,
+    "notes": "Negative of volume-spike rank times one-bar return rank; fades high-volume directional bursts.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return cross-sectionally ranked volume-spike reversal score."""
-    close = panel["close"]
-    volume = panel["volume"]
+    """Return negative rank product used as a volume-spike reversal signal."""
+    close = panel["close"].astype(float)
+    volume = panel["volume"].astype(float)
 
-    vol_ratio = safe_div(volume, ts_mean(volume, 20))
-    vol_spike = signed_power(vol_ratio, 2)
-    spike_rank = ts_rank(vol_spike, 20)
+    ret = safe_div(delta(close, 1), close - delta(close, 1))
+    vol_spike = safe_div(volume, ts_mean(volume, 20))
 
-    recent_ret = delta(close, 1)
-    reversal_rank = rank(-recent_ret)
-
-    score = spike_rank * reversal_rank
-    return rank(score)
+    return -1.0 * rank(vol_spike) * rank(ret)
