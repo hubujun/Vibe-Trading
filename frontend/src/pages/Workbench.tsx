@@ -1230,6 +1230,7 @@ export function Workbench() {
               <div className="px-4 pb-4">
           {/* 执行层状态 + 生命周期记录 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {(strategy?.phase === "live" || strategy?.phase === "review") && (
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-400" />
@@ -1272,6 +1273,7 @@ export function Workbench() {
                 <div className="text-xs text-muted-foreground">执行层数据不可用（Autopilot 未启动或聚合失败）</div>
               )}
             </div>
+            )}
 
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -1298,6 +1300,7 @@ export function Workbench() {
           </div>
 
           {/* 执行明细: 表现 + 持仓 + 交易记录 */}
+          {(strategy?.phase === "live" || strategy?.phase === "review") && (
           <div className="rounded-xl border bg-card p-4">
             <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <Receipt className="h-4 w-4 text-cyan-400" />
@@ -1371,6 +1374,13 @@ export function Workbench() {
               </div>
             </div>
           </div>
+            )}
+
+            {strategy?.phase !== "live" && strategy?.phase !== "review" && (
+              <div className="rounded-lg border border-dashed border-border/60 p-3 text-[11px] text-muted-foreground leading-relaxed">
+                ⏳ 策略当前处于「{PHASE_META[strategy?.phase ?? "research"]?.label ?? strategy?.phase}」阶段 — 进入执行阶段 (live) 后，这里才会展示执行状态 / 持仓 / 交易明细。当前策略尚未开始真实执行。
+              </div>
+            )}
 
               </div>
             )}
