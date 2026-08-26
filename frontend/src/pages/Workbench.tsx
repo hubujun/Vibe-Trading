@@ -661,15 +661,15 @@ export function Workbench() {
                     {viewIdx + 1} / {PHASE_ORDER.length}
                   </span>
                 </div>
-                <div className="flex items-stretch gap-3">
+                <div className="flex items-center gap-3">
                   <div className="flex-[0.75] min-w-0">
-                    {prevStage ? renderCard(prevStage, "sm", () => setViewStage(prevStage)) : <div className="h-full rounded-xl border border-dashed border-border/50 p-2.5 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线起点</div>}
+                    {prevStage ? renderCard(prevStage, "sm", () => setViewStage(prevStage)) : <div className="rounded-xl border border-dashed border-border/50 p-2.5 py-4 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线起点</div>}
                   </div>
                   <div className="flex-[1.25] min-w-0">
                     {renderCard(viewStage, "lg")}
                   </div>
                   <div className="flex-[0.75] min-w-0">
-                    {nextStage ? renderCard(nextStage, "sm", () => setViewStage(nextStage)) : <div className="h-full rounded-xl border border-dashed border-border/50 p-2.5 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线终点</div>}
+                    {nextStage ? renderCard(nextStage, "sm", () => setViewStage(nextStage)) : <div className="rounded-xl border border-dashed border-border/50 p-2.5 py-4 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线终点</div>}
                   </div>
                 </div>
               </>
