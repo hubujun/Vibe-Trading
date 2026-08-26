@@ -178,6 +178,8 @@ export function Workbench() {
   const [mutating, setMutating] = useState(false);
   const [tier, setTier] = useState<"academic" | "mined" | "combo">("academic");
   const [selectedId, setSelectedId] = useState<string>("");
+  // 阶段浏览: 中间显示当前查看的阶段, 左右相邻可点击切换 (默认跟随策略当前阶段)
+  const [viewStage, setViewStage] = useState<string>("research");
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
@@ -210,6 +212,12 @@ export function Workbench() {
   useEffect(() => {
     if (!selectedId && data?.strategies?.length) setSelectedId(data.strategies[0].strategy_id);
   }, [data, selectedId]);
+  // 切换策略时, 阶段浏览重置为该策略当前所处阶段
+  useEffect(() => {
+    const ph = strategy?.phase === "paused" ? "research" : (strategy?.phase ?? "research");
+    setViewStage(ph);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategy?.strategy_id]);
   const phase = strategy?.phase ?? "research";
   const combo2 = data?.combo.metrics.backtest["COMBO2(BAB+52w)"];
   const autopilot = data?.autopilot;
@@ -570,34 +578,61 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* Stage cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {PHASE_ORDER.map((p, i) => {
+          {/* Stage cards: 左右切换浏览 (中间=当前查看阶段, 左右=相邻阶段可点击) */}
+          {(() => {
+            const effectivePhase = strategy?.phase === "paused" ? "research" : (strategy?.phase ?? "research");
+            const currentIdx = Math.max(0, PHASE_ORDER.indexOf(effectivePhase));
+            const viewIdx = Math.max(0, PHASE_ORDER.indexOf(viewStage));
+            const prevStage = viewIdx > 0 ? PHASE_ORDER[viewIdx - 1] : null;
+            const nextStage = viewIdx < PHASE_ORDER.length - 1 ? PHASE_ORDER[viewIdx + 1] : null;
+
+            const renderCard = (p: string, size: "lg" | "sm", onClick?: () => void) => {
               const meta = PHASE_META[p];
               const stats = stageStats[p] ?? [];
-              const st = nodeStatus(p, i);
+              const st = nodeStatus(p, currentIdx);
               const active = st === "current";
               const passed = st === "passed";
+              const isCenter = size === "lg";
               return (
-                <div key={p} className={cn("rounded-xl border bg-card p-4 transition-all", active ? cn(meta.border, "ring-1 ring-current/10") : passed ? "border-cyan-500/30" : "border-border")}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <meta.icon className={cn("h-4 w-4", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
-                    <h2 className="text-sm font-semibold">{meta.label}</h2>
+                <div
+                  key={p}
+                  onClick={onClick}
+                  className={cn(
+                    "rounded-xl border bg-card transition-all",
+                    isCenter
+                      ? cn("p-4", active ? cn(meta.border, "ring-1 ring-current/10") : passed ? "border-cyan-500/30" : "border-border", "shadow-lg")
+                      : "p-2.5 opacity-75 hover:opacity-100 hover:border-cyan-500/40 cursor-pointer border-border",
+                  )}
+                >
+                  <div className={cn("flex items-center gap-2 mb-2", !isCenter && "mb-1")}>
+                    <meta.icon className={cn("h-4 w-4 shrink-0", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
+                    <h2 className={cn("font-semibold", isCenter ? "text-sm" : "text-xs")}>{meta.label}</h2>
                     {(p === "mine" || p === "compose") && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="挖掘与组合是全局供给环节 — 所有策略共享同一因子池/变体池, 不随选中策略变化">全局共享</span>
+                      <span className="hidden lg:inline rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground" title="挖掘与组合是全局供给环节 — 所有策略共享同一因子池/变体池, 不随选中策略变化">全局</span>
                     )}
-                    {active && <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.bg, meta.color)}>当前</span>}
-                    {passed && p !== "review" && <span className="ml-auto rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-400">✓</span>}
+                    {isCenter && viewStage === strategy?.phase && (
+                      <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.bg, meta.color)}>当前</span>
+                    )}
+                    {isCenter && viewStage !== strategy?.phase && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setViewStage(strategy?.phase ?? "research"); }}
+                        className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground hover:bg-accent"
+                        title="回到策略当前所处阶段"
+                      >
+                        回当前
+                      </button>
+                    )}
+                    {!isCenter && passed && p !== "review" && <span className="ml-auto text-[10px] text-cyan-400">✓</span>}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {stats.map((s, si) => (
+                  <div className={cn("grid grid-cols-2 gap-2", isCenter ? "gap-3" : "")}>
+                    {(isCenter ? stats : stats.slice(0, 2)).map((s, si) => (
                       <div key={`${si}-${String(s.label).slice(0, 8)}`}>
-                        <div className="text-[11px] text-muted-foreground">{s.label}</div>
-                        <div className={cn("font-mono text-lg font-bold mt-0.5", s.color ?? "text-foreground")}>{s.value}</div>
+                        <div className={cn("text-muted-foreground", isCenter ? "text-[11px]" : "text-[10px]")}>{s.label}</div>
+                        <div className={cn("font-mono font-bold mt-0.5", isCenter ? "text-lg" : "text-sm", s.color ?? "text-foreground")}>{s.value}</div>
                       </div>
                     ))}
                   </div>
-                  {p === "compose" && strategy && (
+                  {isCenter && p === "compose" && strategy && (
                     <div className="mt-3 border-t border-border/50 pt-2 text-[11px] text-muted-foreground leading-relaxed">
                       当前策略: <span className="text-foreground">{strategy.name}</span>
                       <span className="ml-2 font-mono">
@@ -607,10 +642,39 @@ export function Workbench() {
                       </span>
                     </div>
                   )}
+                  {isCenter && p === "review" && (
+                    <div className="mt-3 border-t border-border/50 pt-2 text-[11px] text-muted-foreground">
+                      ↺ 下一圈: <span className="text-foreground">{review?.loop_next === "research" ? "回研究(回炉)" : "回组合(迭代)"}</span>
+                    </div>
+                  )}
                 </div>
               );
-            })}
-          </div>
+            };
+
+            return (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs text-muted-foreground">
+                    阶段浏览 · 中间为当前查看阶段，点击左右卡片切换
+                  </span>
+                  <span className="text-xs text-muted-foreground opacity-60">
+                    {viewIdx + 1} / {PHASE_ORDER.length}
+                  </span>
+                </div>
+                <div className="flex items-stretch gap-3">
+                  <div className="flex-[0.75] min-w-0">
+                    {prevStage ? renderCard(prevStage, "sm", () => setViewStage(prevStage)) : <div className="h-full rounded-xl border border-dashed border-border/50 p-2.5 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线起点</div>}
+                  </div>
+                  <div className="flex-[1.25] min-w-0">
+                    {renderCard(viewStage, "lg")}
+                  </div>
+                  <div className="flex-[0.75] min-w-0">
+                    {nextStage ? renderCard(nextStage, "sm", () => setViewStage(nextStage)) : <div className="h-full rounded-xl border border-dashed border-border/50 p-2.5 flex items-center justify-center text-[10px] text-muted-foreground opacity-50">已到流水线终点</div>}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {/* Today signal + NAV */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
