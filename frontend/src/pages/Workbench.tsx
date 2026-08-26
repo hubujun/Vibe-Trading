@@ -153,6 +153,12 @@ const TERMS: Record<string, string> = {
   sampleShort: "样本不足：交易记录少于 20 笔，统计上还不能下结论，继续积累",
   loopNext: "下一圈：复盘后螺旋的去向。回组合 = 继续迭代变体；回研究 = 表现差回炉重做",
   signalScore: "因子得分：综合所有因子的加权评分，越高越看多",
+  phaseMine: "挖掘：factor miner 自动挖新因子，过三关（Monte Carlo 置换 / Bootstrap 夏普 / walk-forward）才准用。全局共享环节",
+  phaseCompose: "组合：变体生成器把因子拼成候选组合（调权重 / 三因子 / 加入新因子），自动回测对比基策略，跑赢双超才晋升。全局共享环节",
+  phaseResearch: "研究：回测验证阶段。候选组合用 800 天历史数据回测（年化/夏普/回撤达标），才允许进模拟盘",
+  phasePaper: "模拟：模拟盘用真实行情记账（含 0.1% 交易成本和永续资金费），积累 20 笔调仓后复盘才有统计意义",
+  phaseLive: "执行：autopilot 执行层。当前为纸面账户模拟执行（paper_trading），未接真实交易所",
+  phaseReview: "复盘：每日体检模拟盘表现（vs 回测 / 回撤超限 / 信号新鲜度），输出建议并决定下一圈去向（回组合迭代 / 回研究回炉）",
   lifecycle: "生命周期：因子在矿机-验证体系里的状态。活跃=已过三关在交易，退役=被三关拒绝，候选=待审判",
   tradeCount: "交易数：该因子实际参与的交易笔数，样本越多统计越可信",
   signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
@@ -611,6 +617,7 @@ export function Workbench() {
                   <div className={cn("flex items-center gap-2 mb-2", !isCenter && "mb-1")}>
                     <meta.icon className={cn("h-4 w-4 shrink-0", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
                     <h2 className={cn("font-semibold", isCenter ? "text-sm" : "text-xs")}>{meta.label}</h2>
+                    <Term k={`phase${p[0].toUpperCase()}${p.slice(1)}`}>?</Term>
                     {(p === "mine" || p === "compose") && (
                       <span className="hidden lg:inline rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground" title="挖掘与组合是全局供给环节 — 所有策略共享同一因子池/变体池, 不随选中策略变化">全局</span>
                     )}
