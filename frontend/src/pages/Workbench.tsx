@@ -583,6 +583,9 @@ export function Workbench() {
                   <div className="flex items-center gap-2 mb-3">
                     <meta.icon className={cn("h-4 w-4", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
                     <h2 className="text-sm font-semibold">{meta.label}</h2>
+                    {(p === "mine" || p === "compose") && (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground" title="挖掘与组合是全局供给环节 — 所有策略共享同一因子池/变体池, 不随选中策略变化">全局共享</span>
+                    )}
                     {active && <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold", meta.bg, meta.color)}>当前</span>}
                     {passed && p !== "review" && <span className="ml-auto rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-400">✓</span>}
                   </div>
@@ -594,6 +597,16 @@ export function Workbench() {
                       </div>
                     ))}
                   </div>
+                  {p === "compose" && strategy && (
+                    <div className="mt-3 border-t border-border/50 pt-2 text-[11px] text-muted-foreground leading-relaxed">
+                      当前策略: <span className="text-foreground">{strategy.name}</span>
+                      <span className="ml-2 font-mono">
+                        回测 {strategy?.strategy_backtest?.annual != null ? `${strategy.strategy_backtest.annual}%` : "--"}
+                        / 夏普 {strategy?.strategy_backtest?.sharpe?.toFixed(2) ?? "--"}
+                        / 回撤 {strategy?.strategy_backtest?.max_dd ?? "--"}%
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
