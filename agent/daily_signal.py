@@ -20,6 +20,8 @@ SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT',
             'LTC-USDT', 'DOT-USDT', 'UNI-USDT', 'APT-USDT', 'ARB-USDT']
 COST = 0.001
+#: 永续合约资金费率 (OKX: 0.01%/8h 基准 = 0.03%/天; 多头付/空头收)
+FUNDING_RATE_DAY = 0.0003
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
@@ -177,12 +179,21 @@ def build_signal(strategy: dict) -> dict:
                 if len(seg) >= 1:
                     r_long = seg[state['last_longs']].mean(axis=1).sum()
                     r_short = -seg[state['last_shorts']].mean(axis=1).sum()
-                    net = ((r_long + r_short) / 2 - COST) * mult
+                    # 永续资金费 (OKX 规则: 0.01%/8h = 0.03%/天; 多头付, 空头收)
+                    # 多空对称 (3/3) 时净资金费≈0 — 市场中性组合在永续市场的隐藏红利
+                    n_days = max(1, (last_day - prev_day).days)
+                    funding_paid = len(state['last_longs']) * FUNDING_RATE_DAY * n_days
+                    funding_received = len(state['last_shorts']) * FUNDING_RATE_DAY * n_days
+                    net_funding = funding_received - funding_paid
+                    net = ((r_long + r_short) / 2 - COST) * mult + net_funding
                     state['nav'] *= (1 + net)
                     state['trades'].append({
                         'from': str(prev_day), 'to': str(last_day),
                         'ret': round(net * 100, 2),
                         'exposure_multiplier': mult,
+                        'funding_paid': round(funding_paid * 100, 3),
+                        'funding_received': round(funding_received * 100, 3),
+                        'funding_net': round(net_funding * 100, 3),
                     })
         except Exception as e:
             print('  track 更新失败:', e)

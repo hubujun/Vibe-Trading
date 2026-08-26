@@ -154,6 +154,7 @@ const TERMS: Record<string, string> = {
   loopNext: "下一圈：复盘后螺旋的去向。回组合 = 继续迭代变体；回研究 = 表现差回炉重做",
   signalScore: "因子得分：综合所有因子的加权评分，越高越看多",
   signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
+  fundingHedge: "永续资金费：OKX 每 8 小时结算一次，多头付给空头（正费率时）。多空各 3 仓位时，多头付的被空头收的抵消（净≈0）——这是市场中性对冲组合在永续市场的红利：既对冲了跌价风险，又省掉了纯多头持仓的资金费成本（0.03%/天 × 3 ≈ 年化 33%）。",
   btCompare: "回测对比：800 天历史数据 + 交易成本模拟的结果。COMBO2 = BAB+52周双因子，COMBO3 = 三因子",
   oos: "OOS 样本外：没用过的数据（未来数据），防过拟合的关键",
 };
@@ -740,6 +741,34 @@ export function Workbench() {
               <div className="mt-2 text-xs text-muted-foreground">
                 {paper?.trades?.length ?? 0} 次调仓记录 · 每日 07:00 自动更新
               </div>
+              {(() => {
+                const trades = paper?.trades ?? [];
+                if (!trades.length) return null;
+                const fund = trades.reduce(
+                  (acc, t) => {
+                    acc.paid += t.funding_paid ?? 0;
+                    acc.received += t.funding_received ?? 0;
+                    acc.net += t.funding_net ?? 0;
+                    acc.days += 1;
+                    return acc;
+                  },
+                  { paid: 0, received: 0, net: 0, days: 0 },
+                );
+                // 对比: 若纯多头持仓 (3 仓位), 同期资金费成本
+                const longOnlyCost = -(fund.paid / (fund.days || 1)) * (fund.days || 1);
+                return (
+                  <div className="mt-2 border-t border-border/50 pt-2 text-[10px] text-muted-foreground leading-relaxed">
+                    永续资金费: 多头付 <span className="text-rose-400 font-mono">{fund.paid.toFixed(2)}%</span> / 空头收 <span className="text-emerald-400 font-mono">{fund.received.toFixed(2)}%</span> / 净 <span className="font-mono">{fund.net.toFixed(2)}%</span>
+                    <span title="多空各 3 仓位时, 多头付的资金费被空头收的资金费抵消 — 市场中性组合在永续市场的红利; 纯多头持仓同期成本 ≈ 0.03%/天 × 3">
+                      <Term k="fundingHedge">?</Term>
+                    </span>
+                    {fund.net.toFixed(2) !== "0.00" && (
+                      <span className="text-emerald-400"> — 对冲抵消了 {fund.paid.toFixed(2)}% 的资金费成本</span>
+                    )}
+                    <div className="mt-1 opacity-70">对比: 若纯多头持仓 (不hedge), 同期资金费成本 ≈ -{longOnlyCost.toFixed(2)}% (0.03%/天 × 3 仓位)</div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
