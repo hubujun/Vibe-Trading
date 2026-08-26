@@ -153,6 +153,8 @@ const TERMS: Record<string, string> = {
   sampleShort: "样本不足：交易记录少于 20 笔，统计上还不能下结论，继续积累",
   loopNext: "下一圈：复盘后螺旋的去向。回组合 = 继续迭代变体；回研究 = 表现差回炉重做",
   signalScore: "因子得分：综合所有因子的加权评分，越高越看多",
+  lifecycle: "生命周期：因子在矿机-验证体系里的状态。活跃=已过三关在交易，退役=被三关拒绝，候选=待审判",
+  tradeCount: "交易数：该因子实际参与的交易笔数，样本越多统计越可信",
   signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
   fundingHedge: "永续资金费：OKX 每 8 小时结算一次，多头付给空头（正费率时）。多空各 3 仓位时，多头付的被空头收的抵消（净≈0）——这是市场中性对冲组合在永续市场的红利：既对冲了跌价风险，又省掉了纯多头持仓的资金费成本（0.03%/天 × 3 ≈ 年化 33%）。",
   btCompare: "回测对比：800 天历史数据 + 交易成本模拟的结果。COMBO2 = BAB+52周双因子，COMBO3 = 三因子",
@@ -960,12 +962,12 @@ export function Workbench() {
                       <thead>
                         <tr className="text-xs text-muted-foreground border-b">
                           <th className="text-left py-2 pr-3">因子</th>
-                          <th className="text-left py-2 px-2">生命周期</th>
-                          <th className="text-right py-2 px-2">交易数</th>
+                          <th className="text-left py-2 px-2"><Term k="lifecycle">生命周期</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="tradeCount">交易数</Term></th>
                           <th className="text-right py-2 px-2"><Term k="winRate">胜率</Term></th>
                           <th className="text-right py-2 px-2"><Term k="pf">Profit Factor</Term></th>
                           <th className="text-right py-2 px-2"><Term k="sharpe">Sharpe</Term></th>
-                          <th className="text-right py-2 px-2">IC</th>
+                          <th className="text-right py-2 px-2"><Term k="ic">IC</Term></th>
                           <th className="text-right py-2 px-2"><Term k="pnl">已实现 PnL</Term></th>
                         </tr>
                       </thead>
@@ -1063,10 +1065,10 @@ export function Workbench() {
                       {m && (
                         <>
                           <span className={cn("font-mono", (m.annual ?? 0) > 0 ? "text-emerald-400" : "text-rose-400")}>
-                            年化 {m.annual != null ? `${m.annual > 0 ? "+" : ""}${m.annual}%` : "--"}
+                            <Term k="annual">年化</Term> {m.annual != null ? `${m.annual > 0 ? "+" : ""}${m.annual}%` : "--"}
                           </span>
-                          <span className="font-mono text-muted-foreground">夏普 {m.sharpe ?? "--"}</span>
-                          <span className="font-mono text-rose-400">回撤 {m.max_dd ?? "--"}%</span>
+                          <span className="font-mono text-muted-foreground"><Term k="sharpe">夏普</Term> {m.sharpe ?? "--"}</span>
+                          <span className="font-mono text-rose-400"><Term k="maxDd">回撤</Term> {m.max_dd ?? "--"}%</span>
                         </>
                       )}
                       {h.status === "testing" && <span className="ml-auto text-amber-300">✅ 已晋升，可进模拟</span>}
@@ -1171,13 +1173,13 @@ export function Workbench() {
             {data?.autopilot_performance ? (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 {[
-                  { label: "胜率", value: `${(data.autopilot_performance.win_rate * 100).toFixed(1)}%`, color: "text-emerald-400" },
-                  { label: "已实现 PnL", value: `$${data.autopilot_performance.realized_pnl_usd.toLocaleString()}`, color: data.autopilot_performance.realized_pnl_usd >= 0 ? "text-emerald-400" : "text-rose-400" },
-                  { label: "总交易", value: `${data.autopilot_performance.total_trades}` },
-                  { label: "夏普", value: data.autopilot_performance.sharpe.toFixed(2) },
-                  { label: "最大回撤", value: `${(data.autopilot_performance.max_drawdown * 100).toFixed(1)}%`, color: "text-rose-400" },
-                ].map(k => (
-                  <div key={k.label} className="rounded-lg border border-border/60 p-3">
+                  { label: <Term k="winRate">胜率</Term>, value: `${(data.autopilot_performance.win_rate * 100).toFixed(1)}%`, color: "text-emerald-400" },
+                  { label: <Term k="pnl">已实现 PnL</Term>, value: `$${data.autopilot_performance.realized_pnl_usd.toLocaleString()}`, color: data.autopilot_performance.realized_pnl_usd >= 0 ? "text-emerald-400" : "text-rose-400" },
+                  { label: <Term k="tradeCount">总交易</Term>, value: `${data.autopilot_performance.total_trades}` },
+                  { label: <Term k="sharpe">夏普</Term>, value: data.autopilot_performance.sharpe.toFixed(2) },
+                  { label: <Term k="maxDd">最大回撤</Term>, value: `${(data.autopilot_performance.max_drawdown * 100).toFixed(1)}%`, color: "text-rose-400" },
+                ].map((k, ki) => (
+                  <div key={ki} className="rounded-lg border border-border/60 p-3">
                     <div className="text-[11px] text-muted-foreground">{k.label}</div>
                     <div className={cn("font-mono text-lg font-bold mt-0.5", k.color ?? "text-foreground")}>{k.value}</div>
                   </div>
