@@ -1902,7 +1902,7 @@ export interface WorkbenchStrategy {
     longs?: string[];
     shorts?: string[];
     scores?: Record<string, number>;
-    trades?: Array<{ from: string; to: string; ret: number; exposure_multiplier: number }>;
+    trades?: Array<{ from: string; to: string; ret: number; exposure_multiplier: number; funding_paid?: number; funding_received?: number; funding_net?: number }>;
   };
   review?: Partial<WorkbenchReview>;
   /** 该策略自己的回测指标 (来自变体自动回测缓存) */
