@@ -792,7 +792,8 @@ export function Workbench() {
           </div>
 
 
-          {/* 复盘建议: 流水线闭环输出 — 主链最后一环 */}
+          {/* 复盘建议: 仅复盘阶段展示 (其他阶段: 核心体检指标已在复盘阶段卡) */}
+          {strategy?.phase === "review" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -882,8 +883,10 @@ export function Workbench() {
             </div>
 
           </div>
+          )}
 
-          {/* 研究详情 折叠面板 */}
+          {/* 研究详情 折叠面板: 仅研究阶段展示 */}
+          {strategy?.phase === "research" && (
           <div className="rounded-xl border bg-card overflow-hidden">
             <button
               onClick={() => setOpenDetails(d => ({ ...d, research: !d.research }))}
@@ -1217,6 +1220,7 @@ export function Workbench() {
               </div>
             )}
           </div>
+          )}
 
           {/* 执行详情 折叠面板 */}
           <div className="rounded-xl border bg-card overflow-hidden">
