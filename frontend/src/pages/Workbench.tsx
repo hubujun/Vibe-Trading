@@ -461,7 +461,7 @@ export function Workbench() {
                   active ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300" : "border-border bg-card text-muted-foreground hover:bg-accent",
                 )}
               >
-                <span className="max-w-[180px] truncate">{s.name}</span>
+                <span>{s.name}</span>
                 <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", PHASE_META[sp]?.bg ?? "bg-muted", PHASE_META[sp]?.color ?? "text-muted-foreground")}>
                   {PHASE_META[sp]?.label ?? sp}
                 </span>

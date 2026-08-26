@@ -427,7 +427,7 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
     data.setdefault("strategies", []).append(
         {
             "strategy_id": sid,
-            "name": str(name)[:40],
+            "name": str(name).strip(),
             "phase": "paper",
             "factors": parsed["factors"],
             "weights": parsed["weights"],
