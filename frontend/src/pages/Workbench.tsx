@@ -446,30 +446,44 @@ export function Workbench() {
         </div>
       </div>
 
-      {/* Strategy tabs: 多策略并行切换 */}
+      {/* Strategy selector: 下拉选择框, 按综合效果排序 (有信号优先 → 净值 → 调仓样本) */}
       {data?.strategies.length ? (
         <div className="flex flex-wrap items-center gap-2">
-          {data.strategies.map(s => {
-            const sp = s.phase === "paused" ? "paused" : s.phase;
-            const active = s.strategy_id === strategy?.strategy_id;
-            return (
-              <button
-                key={s.strategy_id}
-                onClick={() => setSelectedId(s.strategy_id)}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition",
-                  active ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-300" : "border-border bg-card text-muted-foreground hover:bg-accent",
-                )}
+          {data.strategies.length > 1 ? (
+            <>
+              <span className="text-xs text-muted-foreground">策略:</span>
+              <select
+                value={selectedId || data.strategies[0].strategy_id}
+                onChange={e => setSelectedId(e.target.value)}
+                className="h-8 min-w-[280px] max-w-[640px] rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground outline-none hover:border-cyan-500/40 focus:border-cyan-500/50"
+                title="按综合效果排序: 有信号优先 → 净值高优先 → 调仓样本多优先"
               >
-                <span>{s.name}</span>
-                <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", PHASE_META[sp]?.bg ?? "bg-muted", PHASE_META[sp]?.color ?? "text-muted-foreground")}>
-                  {PHASE_META[sp]?.label ?? sp}
-                </span>
-                <span className="font-mono text-[10px] opacity-70">净值 {s.paper?.nav != null ? s.paper.nav.toFixed(3) : "--"}</span>
-              </button>
-            );
-          })}
-          {data.strategies.length === 1 && (
+                {[...data.strategies]
+                  .sort((a, b) => {
+                    const na = a.paper?.nav ?? 1, nb = b.paper?.nav ?? 1;
+                    const ta = a.paper?.trades?.length ?? 0, tb = b.paper?.trades?.length ?? 0;
+                    const da = a.paper?.last_signal_date ?? "", db = b.paper?.last_signal_date ?? "";
+                    if (!!da !== !!db) return da ? -1 : 1;
+                    if (na !== nb) return nb - na;
+                    if (ta !== tb) return tb - ta;
+                    return 0;
+                  })
+                  .map(s => {
+                    const nav = s.paper?.nav != null ? s.paper.nav.toFixed(4) : "--";
+                    const nt = s.paper?.trades?.length ?? 0;
+                    const sig = s.paper?.last_signal_date ? ` · 信号${s.paper.last_signal_date}` : " · 待首个信号";
+                    return (
+                      <option key={s.strategy_id} value={s.strategy_id}>
+                        {s.name} — 净值 {nav} · {nt}次调仓{sig}
+                      </option>
+                    );
+                  })}
+              </select>
+              <span className="text-xs text-muted-foreground opacity-70">
+                共 {data.strategies.length} 条 · 按综合效果排序
+              </span>
+            </>
+          ) : (
             <span className="text-xs text-muted-foreground">
               当前 1 条策略 — 组合层变体可播种为新策略并行运行
             </span>
