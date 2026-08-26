@@ -816,9 +816,9 @@ export function Workbench() {
                   <thead>
                     <tr className="text-xs text-muted-foreground border-b">
                       <th className="text-left py-2 pr-3">因子</th>
-                      <th className="text-right py-2 px-2">IC均值</th>
-                      <th className="text-right py-2 px-2">IR</th>
-                      <th className="text-right py-2 px-2">IC+ 比率</th>
+                      <th className="text-right py-2 px-2"><Term k="ic">IC均值</Term></th>
+                      <th className="text-right py-2 px-2"><Term k="ir">IR</Term></th>
+                      <th className="text-right py-2 px-2"><Term k="icPos">IC+ 比率</Term></th>
                     </tr>
                   </thead>
                   <tbody>
