@@ -819,7 +819,7 @@ export function Workbench() {
             </div>
 
             <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3">因子 IC</h2>
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">因子 IC <Term k="ic" /></h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
