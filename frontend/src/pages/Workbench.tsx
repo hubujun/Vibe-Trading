@@ -163,7 +163,7 @@ const TERMS: Record<string, string> = {
   navTrack: "模拟盘净值追踪：该策略模拟盘账户的净值曲线，每个调仓点更新。净值从 1.0 起步，>1 赚钱 <1 亏钱",
   factorTiers: "因子分层：学术(文献因子) → 挖掘(factor miner 自动挖) → 组合(变体拼装)。下层供上层，每层有自己的 IC 表和状态标注",
   autopilotStatus: "执行层状态（Autopilot）：策略信号的实际执行引擎。当前 paper_trading = 纸面模拟执行，未接真实交易所",
-  lifecycleLog: "生命周期记录：策略阶段变更的历史流水（挖掘→组合→研究→模拟→执行→复盘 的状态迁移记录）",
+  lifecycleLog: "流水线生命周期记录：策略在流水线里的阶段变更履历（挖掘→组合→研究→模拟→执行→复盘 每次迁移都有记录），可追溯它怎么一步步走到今天",
   execDetail: "执行明细（纸面账户）：纸面账户的交易统计（胜率/PnL/夏普/回撤）+ 当前持仓。样本少时数字仅供参考",
   reviewAdvice: "复盘建议（Loop 反馈）：复盘引擎给策略的体检报告和建议（下一圈去组合迭代还是回研究回炉），每日 08:30 更新",
   hypothesisReg: "假设注册表：所有假设（学术因子/挖掘因子/变体组合）的状态档案。exploring→testing→validated 是晋升路径，rejected 是被否决的",
@@ -1223,12 +1223,12 @@ export function Workbench() {
             <button
               onClick={() => setOpenDetails(d => ({ ...d, exec: !d.exec }))}
               className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
-              <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" />执行详情<span className="text-[11px] font-normal text-muted-foreground">执行状态 · 生命周期 · 执行明细</span></span>
+              <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" />执行详情<span className="text-[11px] font-normal text-muted-foreground">执行状态 · 流水线生命周期 · 执行明细</span></span>
               <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.exec && "rotate-180")} />
             </button>
             {openDetails.exec && (
               <div className="px-4 pb-4">
-          {/* 执行层状态 + 生命周期记录 */}
+          {/* 执行层状态 + 流水线生命周期记录 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {(strategy?.phase === "live" || strategy?.phase === "review") && (
             <div className="rounded-xl border bg-card p-4">
@@ -1278,7 +1278,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <History className="h-4 w-4 text-purple-400" />
-                生命周期记录 <Term k="lifecycleLog" />
+                流水线生命周期记录 <Term k="lifecycleLog" />
               </h2>
               {history.length ? (
                 <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
@@ -1294,7 +1294,7 @@ export function Workbench() {
                   ))}
                 </div>
               ) : (
-                <div className="text-xs text-muted-foreground">暂无生命周期记录 — 使用右上角按钮推进策略阶段</div>
+                <div className="text-xs text-muted-foreground">暂无流水线生命周期记录 — 使用右上角按钮推进策略阶段</div>
               )}
             </div>
           </div>
