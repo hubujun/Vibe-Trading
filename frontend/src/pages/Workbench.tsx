@@ -617,7 +617,7 @@ export function Workbench() {
                   <div className={cn("flex items-center gap-2 mb-2", !isCenter && "mb-1")}>
                     <meta.icon className={cn("h-4 w-4 shrink-0", active ? meta.color : passed ? "text-cyan-400" : "text-muted-foreground")} />
                     <h2 className={cn("font-semibold", isCenter ? "text-sm" : "text-xs")}>{meta.label}</h2>
-                    <Term k={`phase${p[0].toUpperCase()}${p.slice(1)}`}>?</Term>
+                    <Term k={`phase${p[0].toUpperCase()}${p.slice(1)}`} />
                     {(p === "mine" || p === "compose") && (
                       <span className="hidden lg:inline rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground" title="挖掘与组合是全局供给环节 — 所有策略共享同一因子池/变体池, 不随选中策略变化">全局</span>
                     )}
@@ -695,7 +695,7 @@ export function Workbench() {
                 {paper?.last_signal_date && (
                   <span className="text-xs font-normal text-muted-foreground">({paper.last_signal_date})</span>
                 )}
-                <Term k="signalExplain">?</Term>
+                <Term k="signalExplain" />
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -769,7 +769,7 @@ export function Workbench() {
                   <div className="mt-2 border-t border-border/50 pt-2 text-[10px] text-muted-foreground leading-relaxed">
                     永续资金费: 多头付 <span className="text-rose-400 font-mono">{fund.paid.toFixed(2)}%</span> / 空头收 <span className="text-emerald-400 font-mono">{fund.received.toFixed(2)}%</span> / 净 <span className="font-mono">{fund.net.toFixed(2)}%</span>
                     <span title="多空各 3 仓位时, 多头付的资金费被空头收的资金费抵消 — 市场中性组合在永续市场的红利; 纯多头持仓同期成本 ≈ 0.03%/天 × 3">
-                      <Term k="fundingHedge">?</Term>
+                      <Term k="fundingHedge" />
                     </span>
                     {fund.net.toFixed(2) !== "0.00" && (
                       <span className="text-emerald-400"> — 对冲抵消了 {fund.paid.toFixed(2)}% 的资金费成本</span>
@@ -786,7 +786,7 @@ export function Workbench() {
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 回测对比（800天 · 含成本）
-                <Term k="btCompare">?</Term>
+                <Term k="btCompare" />
               </h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
