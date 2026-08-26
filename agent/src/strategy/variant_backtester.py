@@ -437,6 +437,14 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
             "rebalance": "日频 · 每日 07:00",
             "signal_definition": signal_definition,
             "run_dir": str(run_dir),
+            "phase_history": [
+                {
+                    "phase": "paper",
+                    "at": now,
+                    "action": "seeded",
+                    "note": "晋升变体自动播种进模拟盘",
+                }
+            ],
             "created_at": now,
             "updated_at": None,
         }
