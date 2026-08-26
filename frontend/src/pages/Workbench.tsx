@@ -153,6 +153,7 @@ const TERMS: Record<string, string> = {
   sampleShort: "样本不足：交易记录少于 20 笔，统计上还不能下结论，继续积累",
   loopNext: "下一圈：复盘后螺旋的去向。回组合 = 继续迭代变体；回研究 = 表现差回炉重做",
   signalScore: "因子得分：综合所有因子的加权评分，越高越看多",
+  signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
   btCompare: "回测对比：800 天历史数据 + 交易成本模拟的结果。COMBO2 = BAB+52周双因子，COMBO3 = 三因子",
   oos: "OOS 样本外：没用过的数据（未来数据），防过拟合的关键",
 };
@@ -684,11 +685,12 @@ export function Workbench() {
                 {paper?.last_signal_date && (
                   <span className="text-xs font-normal text-muted-foreground">({paper.last_signal_date})</span>
                 )}
+                <Term k="signalExplain">?</Term>
               </h2>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-xs text-emerald-400 mb-2 flex items-center gap-1">
-                    <ArrowUpRight className="h-3.5 w-3.5" /> 做多
+                    <ArrowUpRight className="h-3.5 w-3.5" /> 做多 <span className="text-[10px] text-muted-foreground font-normal">得分最高 3 个</span>
                   </div>
                   {(paper?.longs ?? []).map(sym => (
                     <div key={sym} className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
@@ -705,7 +707,7 @@ export function Workbench() {
                 </div>
                 <div>
                   <div className="text-xs text-rose-400 mb-2 flex items-center gap-1">
-                    <ArrowDownRight className="h-3.5 w-3.5" /> 做空
+                    <ArrowDownRight className="h-3.5 w-3.5" /> 做空 <span className="text-[10px] text-muted-foreground font-normal">得分最低 3 个</span>
                   </div>
                   {(paper?.shorts ?? []).map(sym => (
                     <div key={sym} className="mb-2 rounded-lg border border-rose-500/30 bg-rose-500/5 p-2.5">
@@ -720,6 +722,9 @@ export function Workbench() {
                   ))}
                   {!(paper?.shorts?.length) && <div className="text-xs text-muted-foreground">等待每日信号…</div>}
                 </div>
+              </div>
+              <div className="mt-3 border-t border-border/50 pt-2 text-[10px] text-muted-foreground leading-relaxed">
+                得分 = 多因子加权打分（横截面 z-score，正=相对强势，负=相对弱势）· 每日 07:00 更新 · 信号是相对强弱排名，不是涨跌预测
               </div>
             </div>
 
