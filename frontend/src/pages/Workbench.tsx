@@ -997,7 +997,7 @@ export function Workbench() {
           </div>
 
           {/* 因子分层: 学术层 / 挖掘层 / 组合层 */}
-          <div className="rounded-xl border bg-card p-4">
+          <div className="mt-6 rounded-xl border bg-card p-4">
             <div className="flex flex-wrap items-center gap-3 mb-4">
               <h2 className="text-sm font-semibold flex items-center gap-2">
                 <FlaskConical className="h-4 w-4 text-amber-400" />
