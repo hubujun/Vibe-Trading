@@ -1391,7 +1391,8 @@ export function Workbench() {
           </div>
           )}
 
-          {/* 假设注册表 折叠面板 */}
+          {/* 假设注册表 折叠面板: 组合阶段的内容 (变体池状态档案) — 浏览到组合阶段时展示 */}
+          {viewStage === "compose" && (
           <div className="rounded-xl border bg-card overflow-hidden">
             <button
               onClick={() => setOpenDetails(d => ({ ...d, registry: !d.registry }))}
@@ -1449,6 +1450,7 @@ export function Workbench() {
               </div>
             )}
           </div>
+          )}
 
         </>
       )}
