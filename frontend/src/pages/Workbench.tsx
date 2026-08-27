@@ -198,8 +198,8 @@ export function Workbench() {
   const [selectedId, setSelectedId] = useState<string>("");
   // 阶段浏览: 中间显示当前查看的阶段, 左右相邻可点击切换 (默认跟随策略当前阶段)
   const [viewStage, setViewStage] = useState<string>("research");
-  // 详情面板折叠态: 研究/执行/假设注册表 默认收起, 保持流水线主链清晰
-  const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({ research: false, exec: false, registry: false });
+  // 详情面板折叠态: 研究/假设注册表默认收起; 执行详情默认展开 (浏览到执行阶段即见全貌)
+  const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({ research: false, exec: true, registry: false });
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
