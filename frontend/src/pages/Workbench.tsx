@@ -200,6 +200,8 @@ export function Workbench() {
   const [viewStage, setViewStage] = useState<string>("research");
   // 详情面板: 全部默认展开 — 阶段浏览到哪个阶段, 对应详情直接展示全貌 (可手动收起)
   const [openDetails, setOpenDetails] = useState<Record<string, boolean>>({ research: true, exec: true, registry: true });
+  // 流水线生命周期记录: 默认折叠 (履历是低频查看内容)
+  const [openLifecycle, setOpenLifecycle] = useState(false);
   const dark = useThemeDark();
 
   const load = async (signal?: AbortSignal) => {
@@ -598,12 +600,16 @@ export function Workbench() {
             </div>
           </div>
 
-          {/* 流水线生命周期记录: 策略阶段履历 — 恒显示在阶段浏览上方 */}
-            <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <History className="h-4 w-4 text-purple-400" />
-                流水线生命周期记录 <Term k="lifecycleLog" />
-              </h2>
+          {/* 流水线生命周期记录: 策略阶段履历 — 默认折叠, 点击展开 */}
+          <div className="rounded-xl border bg-card overflow-hidden">
+            <button
+              onClick={() => setOpenLifecycle(o => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
+              <span className="flex items-center gap-2"><History className="h-4 w-4 text-purple-400" />流水线生命周期记录 <Term k="lifecycleLog" /></span>
+              <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openLifecycle && "rotate-180")} />
+            </button>
+            {openLifecycle && (
+              <div className="px-4 pb-4">
               {history.length ? (
                 <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
                   {history.map((ev, i) => (
@@ -620,7 +626,9 @@ export function Workbench() {
               ) : (
                 <div className="text-xs text-muted-foreground">暂无流水线生命周期记录 — 使用右上角按钮推进策略阶段</div>
               )}
-            </div>
+              </div>
+            )}
+          </div>
 
           {/* Stage cards: 左右切换浏览 (中间=当前查看阶段, 左右=相邻阶段可点击) */}
           {(() => {
