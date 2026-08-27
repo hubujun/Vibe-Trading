@@ -598,6 +598,30 @@ export function Workbench() {
             </div>
           </div>
 
+          {/* 流水线生命周期记录: 策略阶段履历 — 恒显示在阶段浏览上方 */}
+            <div className="rounded-xl border bg-card p-4">
+              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <History className="h-4 w-4 text-purple-400" />
+                流水线生命周期记录 <Term k="lifecycleLog" />
+              </h2>
+              {history.length ? (
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {history.map((ev, i) => (
+                    <div key={`${ev.at}-${i}`} className="flex items-center gap-2 rounded-lg border border-border/50 px-3 py-2 text-xs">
+                      <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-semibold", PHASE_META[ev.phase]?.bg ?? "bg-muted", PHASE_META[ev.phase]?.color ?? "text-muted-foreground")}>
+                        {PHASE_META[ev.phase]?.label ?? ev.phase}
+                      </span>
+                      <span className="text-muted-foreground font-mono">{ev.action}</span>
+                      {ev.note && <span className="text-muted-foreground truncate">· {ev.note}</span>}
+                      <span className="ml-auto text-muted-foreground/70 font-mono shrink-0">{String(ev.at).replace("T", " ").slice(5, 16)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground">暂无流水线生命周期记录 — 使用右上角按钮推进策略阶段</div>
+              )}
+            </div>
+
           {/* Stage cards: 左右切换浏览 (中间=当前查看阶段, 左右=相邻阶段可点击) */}
           {(() => {
             const effectivePhase = strategy?.phase === "paused" ? "research" : (strategy?.phase ?? "research");
@@ -1227,7 +1251,7 @@ export function Workbench() {
             <button
               onClick={() => setOpenDetails(d => ({ ...d, exec: !d.exec }))}
               className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
-              <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" />执行详情<span className="text-[11px] font-normal text-muted-foreground">执行状态 · 流水线生命周期 · 执行明细</span></span>
+              <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-muted-foreground" />执行详情<span className="text-[11px] font-normal text-muted-foreground">执行状态 · 执行明细</span></span>
               <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.exec && "rotate-180")} />
             </button>
             {openDetails.exec && (
@@ -1278,29 +1302,6 @@ export function Workbench() {
               )}
             </div>
             )}
-
-            <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <History className="h-4 w-4 text-purple-400" />
-                流水线生命周期记录 <Term k="lifecycleLog" />
-              </h2>
-              {history.length ? (
-                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                  {history.map((ev, i) => (
-                    <div key={`${ev.at}-${i}`} className="flex items-center gap-2 rounded-lg border border-border/50 px-3 py-2 text-xs">
-                      <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-semibold", PHASE_META[ev.phase]?.bg ?? "bg-muted", PHASE_META[ev.phase]?.color ?? "text-muted-foreground")}>
-                        {PHASE_META[ev.phase]?.label ?? ev.phase}
-                      </span>
-                      <span className="text-muted-foreground font-mono">{ev.action}</span>
-                      {ev.note && <span className="text-muted-foreground truncate">· {ev.note}</span>}
-                      <span className="ml-auto text-muted-foreground/70 font-mono shrink-0">{String(ev.at).replace("T", " ").slice(5, 16)}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">暂无流水线生命周期记录 — 使用右上角按钮推进策略阶段</div>
-              )}
-            </div>
           </div>
 
           {/* 执行明细: 表现 + 持仓 + 交易记录 */}
