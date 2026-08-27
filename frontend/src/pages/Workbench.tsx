@@ -1246,7 +1246,8 @@ export function Workbench() {
           </div>
           )}
 
-          {/* 执行详情 折叠面板 */}
+{/* 执行详情 折叠面板: 浏览到执行阶段时展示 (与研究详情同构) */}
+          {viewStage === "live" && (
           <div className="rounded-xl border bg-card overflow-hidden">
             <button
               onClick={() => setOpenDetails(d => ({ ...d, exec: !d.exec }))}
@@ -1258,7 +1259,6 @@ export function Workbench() {
               <div className="px-4 pb-4">
           {/* 执行层状态 + 流水线生命周期记录 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {(viewStage === "live" || viewStage === "review") && (
             <div className="rounded-xl border bg-card p-4">
               <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-emerald-400" />
@@ -1301,11 +1301,9 @@ export function Workbench() {
                 <div className="text-xs text-muted-foreground">执行层数据不可用（Autopilot 未启动或聚合失败）</div>
               )}
             </div>
-            )}
           </div>
 
           {/* 执行明细: 表现 + 持仓 + 交易记录 */}
-          {(viewStage === "live" || viewStage === "review") && (
           <div className="rounded-xl border bg-card p-4">
             <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
               <Receipt className="h-4 w-4 text-cyan-400" />
@@ -1379,17 +1377,11 @@ export function Workbench() {
               </div>
             </div>
           </div>
-            )}
-
-            {strategy?.phase !== "live" && strategy?.phase !== "review" && (
-              <div className="rounded-lg border border-dashed border-border/60 p-3 text-[11px] text-muted-foreground leading-relaxed">
-                正在浏览「{PHASE_META[viewStage ?? "research"]?.label ?? viewStage}」阶段 — 浏览到执行 (live) 阶段时，这里展示执行状态 / 持仓 / 交易明细。
-              </div>
-            )}
 
               </div>
             )}
           </div>
+          )}
 
           {/* 假设注册表 折叠面板 */}
           <div className="rounded-xl border bg-card overflow-hidden">
