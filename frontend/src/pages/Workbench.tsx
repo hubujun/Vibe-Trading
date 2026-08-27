@@ -1301,7 +1301,6 @@ export function Workbench() {
                 <div className="text-xs text-muted-foreground">执行层数据不可用（Autopilot 未启动或聚合失败）</div>
               )}
             </div>
-          </div>
 
           {/* 执行明细: 表现 + 持仓 + 交易记录 */}
           <div className="rounded-xl border bg-card p-4">
@@ -1376,6 +1375,7 @@ export function Workbench() {
                 )}
               </div>
             </div>
+          </div>
           </div>
 
               </div>
