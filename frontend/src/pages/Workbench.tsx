@@ -166,7 +166,7 @@ const TERMS: Record<string, string> = {
   lifecycleLog: "流水线生命周期记录：策略在流水线里的阶段变更履历（挖掘→组合→研究→模拟→执行→复盘 每次迁移都有记录），可追溯它怎么一步步走到今天",
   execDetail: "执行明细（纸面账户）：纸面账户的交易统计（胜率/PnL/夏普/回撤）+ 当前持仓。样本少时数字仅供参考",
   reviewAdvice: "复盘建议（Loop 反馈）：复盘引擎给策略的体检报告和建议（下一圈去组合迭代还是回研究回炉），每日 08:30 更新",
-  hypothesisReg: "假设注册表：所有假设（学术因子/挖掘因子/变体组合）的状态档案。exploring→testing→validated 是晋升路径，rejected 是被否决的",
+  hypothesisReg: "候选组合：所有因子假设（学术/挖掘）与变体组合的状态档案。exploring→testing→validated 是晋升路径，rejected 是被否决的。每次回测跑赢基策略的组合自动晋升并播种进模拟盘",
   lifecycle: "生命周期：因子在矿机-验证体系里的状态。活跃=已过三关在交易，退役=被三关拒绝，候选=待审判",
   tradeCount: "交易数：该因子实际参与的交易笔数，样本越多统计越可信",
   signalExplain: "今日信号 = 在 15 个币里做横截面打分（z-score 标准化）：得分最高 3 个做多（预期相对强势），最低 3 个做空（预期相对弱势）。注意：这是相对强弱排名，不是涨跌预测——普涨行情里做空的币也可能上涨，普跌行情里做多的币也可能下跌。",
@@ -1391,13 +1391,13 @@ export function Workbench() {
           </div>
           )}
 
-          {/* 假设注册表 折叠面板: 组合阶段的内容 (变体池状态档案) — 浏览到组合阶段时展示 */}
+          {/* 候选组合 折叠面板: 组合阶段的内容 (变体池状态档案) — 浏览到组合阶段时展示 */}
           {viewStage === "compose" && (
           <div className="rounded-xl border bg-card overflow-hidden">
             <button
               onClick={() => setOpenDetails(d => ({ ...d, registry: !d.registry }))}
               className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors">
-              <span className="flex items-center gap-2"><Layers className="h-4 w-4 text-muted-foreground" />假设注册表<span className="text-[11px] font-normal text-muted-foreground">全部假设状态档案</span></span>
+              <span className="flex items-center gap-2"><Layers className="h-4 w-4 text-muted-foreground" />候选组合<span className="text-[11px] font-normal text-muted-foreground">因子假设 + 变体组合档案</span></span>
               <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", openDetails.registry && "rotate-180")} />
             </button>
             {openDetails.registry && (
