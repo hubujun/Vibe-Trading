@@ -1402,11 +1402,6 @@ export function Workbench() {
             </button>
             {openDetails.registry && (
               <div className="px-4 pb-4">
-            <div className="rounded-xl border bg-card p-4">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <FlaskConical className="h-4 w-4 text-purple-400" />
-                假设注册表 <Term k="hypothesisReg" />
-              </h2>
               <div className="grid grid-cols-1 gap-3">
                 {hypotheses.map(h => {
                   const m = review?.variant_metrics?.[h.hypothesis_id];
@@ -1446,7 +1441,6 @@ export function Workbench() {
                 })}
                 {!hypotheses.length && <div className="text-xs text-muted-foreground">暂无假设记录</div>}
               </div>
-            </div>
               </div>
             )}
           </div>
