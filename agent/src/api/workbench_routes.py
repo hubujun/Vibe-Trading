@@ -298,11 +298,14 @@ def _transition(strategy_id: str, action: str, note: Optional[str]) -> Workbench
 # ============================================================================
 
 
-def _apply_adaptations(review: Any, strategies: list[dict[str, Any]]) -> dict[str, Any]:
+def _apply_adaptations(review: Any, strategies: list[dict[str, Any]], persist: bool = True) -> dict[str, Any]:
     """应用复盘输出到策略参数 (第三圈).
 
     对每条策略: 用当前 params 计算自适应变更, 应用并记录到 adaptation_history.
     幂等: 无变更时原样返回. 持久化失败不阻断 (下次 GET 重试).
+
+    persist=False: 只更新内存对象, 不写文件 — 批量调用时由调用方统一持久化
+    (否则每次调用会以部分列表覆盖 strategies.json, 造成策略丢失).
     """
     from src.strategy.review_engine import compute_adaptations
 
@@ -332,7 +335,7 @@ def _apply_adaptations(review: Any, strategies: list[dict[str, Any]]) -> dict[st
             strategy["params"] = params
             strategy["updated_at"] = _now_iso()
             changed = True
-        if changed:
+        if changed and persist:
             try:
                 _write_strategies(strategies)
             except OSError as exc:
@@ -493,8 +496,8 @@ def register_workbench_routes(
                         hypotheses_path=hypotheses_path,
                         baseline=baseline,
                     )
-                    # 第三圈: 参数自适应 — 应用到该策略自身
-                    applied = _apply_adaptations(r, [s])
+                    # 第三圈: 参数自适应 — 应用到该策略自身 (内存中, 不落盘)
+                    applied = _apply_adaptations(r, [s], persist=False)
                     r.adaptations.extend(applied["adaptations"])
                     review_dict = r.to_dict()
                     # 假设流转记录只在基策略上收 (幂等, 避免重复)
@@ -510,6 +513,12 @@ def register_workbench_routes(
         except Exception:  # noqa: BLE001
             logger.warning("workbench: loop aggregation failed", exc_info=True)
             variants, variant_metrics, global_hypothesis_updates = [], {}, []
+
+        # 循环后统一持久化参数自适应 (避免部分列表覆盖 strategies.json)
+        try:
+            _write_strategies(raw_strategies)
+        except OSError as exc:
+            logger.warning("workbench: batch adaptation persist failed: %s", exc)
 
         review_dict = {
             "hypothesis_updates": global_hypothesis_updates,
