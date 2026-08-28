@@ -400,7 +400,9 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
     try:
         data = _json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
-        data = {"strategies": []}
+        # 读取失败绝不能静默覆盖 — 会把 strategies.json 清成只剩新播种的 1 条
+        logger.error("auto-seed 中止: strategies.json 读取失败 (%s)", p)
+        return None
     sids = [str(s.get("signal_definition", "")) for s in data.get("strategies", [])]
     if signal_definition in sids:
         return None
