@@ -832,6 +832,18 @@ def run_variant_backtests(
         save_backtest_cache(cache)
     else:
         _write_cache(cache_path, cache)
+    # 实验日志: 回测轮次结果 (append-only 审计)
+    try:
+        from src.strategy.experiment_log import log_experiment
+        log_experiment(
+            "backtest",
+            n_backtested=len(backtested), n_promoted=len(promoted),
+            n_rejudged=len(rejudged), n_dup_skipped=len(dup_skipped),
+            seeded_ids=[r.get("seeded_strategy_id") for r in promoted
+                        if r.get("seeded_strategy_id")],
+        )
+    except Exception:  # noqa: BLE001 — 日志失败绝不阻塞回测
+        pass
     return {"backtested": backtested, "promoted": promoted, "rejudged": rejudged,
             "dup_skipped": dup_skipped, "skipped": max(0, len(candidates) - max_per_run)}
 
