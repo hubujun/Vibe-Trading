@@ -33,6 +33,7 @@
   <a href="https://vibetrading.wiki/docs/">文档</a> &nbsp;&middot;&nbsp;
   <a href="#-news">News</a> &nbsp;&middot;&nbsp;
   <a href="#-key-features">Features</a> &nbsp;&middot;&nbsp;
+  <a href="#-loop-engineering-策略流水线本地增强">Loop Engineering</a> &nbsp;&middot;&nbsp;
   <a href="#-shadow-account">Shadow Account</a> &nbsp;&middot;&nbsp;
   <a href="#-demo">Demo</a> &nbsp;&middot;&nbsp;
   <a href="#-quick-start">Quick Start</a> &nbsp;&middot;&nbsp;
@@ -325,6 +326,78 @@ vibe-trading alpha bench --zoo gtja191 --universe csi300 --period 2018-2025 --to
 ```bash
 vibe-trading --upload trades_export.csv
 vibe-trading run -p "Analyze my trading behavior, extract my shadow strategy, and compare it with my actual trades"
+```
+
+---
+
+## 🔄 Loop Engineering 策略流水线（本地增强）
+
+> 本仓库在官方 Vibe-Trading 之上扩展了一套**自动进化策略流水线**（策略流水线工作台，`/workbench`）。
+> 核心思想：把策略研发做成一条**自动旋转的闭环**——挖掘 → 组合 → 研究 → 模拟 → 执行 → 复盘，
+> 六环节全自动运转，策略自己迭代自己。
+
+### 六环节闭环
+
+| 环节 | 干什么 | 产出 |
+|------|--------|------|
+| 🔬 挖掘 | factor miner 自动从行情里挖新因子（量价/微观结构），写进 zoo | 新因子候选 |
+| 🧩 组合 | 变体生成器把因子拼成候选组合（调权重/三因子/加新因子），自动回测 | 变体池（69+ 已回测） |
+| 📖 研究 | 800 天回测对比基策略，年化/夏普/回撤双超才晋升 | 晋升变体 |
+| 💰 模拟 | 模拟盘真实行情记账（0.1% 成本 + 永续资金费），积累 20 笔样本 | 净值曲线 |
+| ⚡ 执行 | autopilot 执行层（当前 paper_trading 纸面执行） | 执行记录 |
+| 🔁 复盘 | 每日体检（vs 回测/回撤超限/连亏 3 笔），决定下一圈去向 | 复盘建议 |
+
+### 自动进化（1+2 闭环）
+
+- **挖掘因子自动入池**：zoo 未退役候选自动补充进变体生成池
+- **晋升自动播种**：回测跑赢动态基准（`_BASE_`，15 币宇宙自动计算）的变体，
+  自动播种为并行策略直接进模拟盘，次日 07:00 自动出信号
+- **动态晋升基准**：universe 变化自动重判全部已缓存变体
+
+### 多策略并行模拟盘
+
+- 22 条策略并行（基策略 + 自动播种变体），各自独立 run_dir 记账
+- OKX 蜡烛时区归一（北京时间 00:00），调仓记账含 0.1% 成本 + 永续资金费
+  （多头付/空头收，市场中性组合净≈0 —— 对冲的隐藏红利）
+- 参数自适应：连亏/回撤超限自动降杠杆（illiq 已从 1.0 → 0.25）
+
+### 🛡️ 三层宏观事件结合方案
+
+重大市场事件（监管立法/美联储决议/黑天鹅）通过三层融入因子策略：
+
+1. **事件日历风控**：`~/.vibe-trading/macro_events.json` 维护事件日历，
+   A 级事件日（监管立法/央行）自动降杠杆 ×0.5，B 级（FOMC/ETF）×0.8；
+   每日 06:50 自动飞书提醒，20:00 自动侦察新闻源发现新事件（LLM 判断重大性）
+2. **regime 制度切换**：BTC 20d 动量 ≥+4% → risk_on 满仓；≤-4% → risk_off
+   全局缩仓 ×0.7 + 空头腿打折 ×0.5（防轧），多空腿分开乘乘数记账
+3. **市场状态因子**：`market_regime_momentum`（动量×BTC 制度）、
+   `market_regime_volatility`（BTC 波动率飙升偏向低波动币）——可回测的事件代理因子，
+   进自动进化闭环，跑赢即播种
+
+### 工作台 UI（阶段驱动）
+
+- 六阶段卡左右浏览（中间当前阶段 + 左右相邻可点击），详情面板跟随浏览阶段展示
+- 策略下拉按综合效果排序（有信号 → 净值 → 样本量）
+- 今日信号白话解读、净值追踪含资金费、候选组合档案（探索中/验证中/已验证/已否决）
+
+### 常用命令
+
+```bash
+# 启动后端 API (8899) + 前端 (5899)
+.venv/bin/vibe-trading serve --port 8899 --host 127.0.0.1
+cd frontend && npm run dev
+
+# 每日信号 (所有策略并行)
+bash ~/.hermes/scripts/combo_daily_signal.sh
+
+# 变体回测 (cron 08:45)
+.venv/bin/python -m src.strategy.variant_backtester --max-per-run 20
+
+# 测试
+cd agent && ../.venv/bin/python -m pytest tests/test_macro_events.py tests/test_workbench_routes.py
+
+# 事件日历 (手动维护重大事件)
+vim ~/.vibe-trading/macro_events.json   # {"events":[{"date":"2026-09-15","title":"...","level":"A"}]}
 ```
 
 ---
