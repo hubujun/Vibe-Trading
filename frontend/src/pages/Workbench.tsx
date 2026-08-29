@@ -145,10 +145,10 @@ const TERMS: Record<string, string> = {
   bab: "BAB 低贝塔因子：做多波动小的币、做空波动大的币，赚'低波动溢价'。学术文献里的经典因子",
   high52w: "52 周高点因子：离 52 周最高点越近（强势）的币越可能继续涨，动量效应",
   rmw: "RMW 盈利因子：盈利能力强的公司/币表现更好（用价格波动代理）",
-  exploring: "exploring 探索中：变体刚生成，等待回测验证",
-  testing: "testing 验证中：已通过回测，等待模拟盘验证",
-  validated: "validated 已验证：模拟盘表现合格，可上线",
-  rejected: "rejected 已否决：验证失败（连亏/回撤超限），不再使用",
+  exploring: "探索中：变体刚生成，等待回测验证",
+  testing: "验证中：已通过回测，等待模拟盘验证",
+  validated: "已验证：模拟盘表现合格，可上线",
+  rejected: "已否决：验证失败（连亏/回撤超限），不再使用",
   monitoring: "monitoring 观察中：曾经合格但现在回撤超限，降级观察",
   ddBreach: "回撤超限：模拟盘当前回撤超过回测最大回撤的 1.5 倍，触发风控（降杠杆/建议回炉）",
   sampleShort: "样本不足：交易记录少于 20 笔，统计上还不能下结论，继续积累",
@@ -173,6 +173,15 @@ const TERMS: Record<string, string> = {
   fundingHedge: "永续资金费：OKX 每 8 小时结算一次，多头付给空头（正费率时）。多空各 3 仓位时，多头付的被空头收的抵消（净≈0）——这是市场中性对冲组合在永续市场的红利：既对冲了跌价风险，又省掉了纯多头持仓的资金费成本（0.03%/天 × 3 ≈ 年化 33%）。",
   btCompare: "回测对比：800 天历史数据 + 交易成本模拟的结果。COMBO2 = BAB+52周双因子，COMBO3 = 三因子",
   oos: "OOS 样本外：没用过的数据（未来数据），防过拟合的关键",
+};
+
+// 假设状态 → 中文标签 (UI 展示)
+const STATUS_LABEL: Record<string, string> = {
+  exploring: "探索中",
+  testing: "验证中",
+  validated: "已验证",
+  monitoring: "观察中",
+  rejected: "已否决",
 };
 
 /** 术语徽标: 词 + 问号, hover 显示白话解释. */
@@ -400,7 +409,7 @@ export function Workbench() {
     compose: [
       { label: "变体候选", value: `${variantCount}`, color: "text-purple-400" },
       { label: "已自动回测", value: `${backtestedCount}`, color: "text-cyan-400" },
-      { label: <Term k="testing">晋升 testing</Term>, value: `${testingCount}`, color: "text-amber-400" },
+      { label: <Term k="testing">晋升验证中</Term>, value: `${testingCount}`, color: "text-amber-400" },
       { label: "自动回测", value: "每日 08:45" },
     ],
     research: [
@@ -1213,7 +1222,7 @@ export function Workbench() {
                   return (
                     <div key={h.hypothesis_id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border/50 px-3 py-2 text-xs">
                       <span className={cn("shrink-0 rounded-full px-2 py-0.5 font-semibold", h.status === "testing" ? "bg-amber-500/20 text-amber-400" : "bg-muted text-muted-foreground")}>
-                        {h.status}
+                        {STATUS_LABEL[h.status] ?? h.status}
                       </span>
                       <span className="font-medium">{h.title.replace("BAB+high52w 双因子组合 · ", "")}</span>
                       {m && (
@@ -1419,7 +1428,7 @@ export function Workbench() {
                             h.status === "exploring" && "bg-muted text-muted-foreground",
                           )}
                         >
-                          {h.status}
+                          {STATUS_LABEL[h.status] ?? h.status}
                         </span>
                       </div>
                       {h.thesis && <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{h.thesis}</div>}
