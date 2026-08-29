@@ -108,6 +108,25 @@ def build_report() -> str:
         for v in variants:
             lines.append(f"  • {v['title'][:30]} (exploring)")
     lines.append("---")
+    # 最近调仓归因 (缓存优先, 失败静默不影响主报告)
+    try:
+        from src.strategy.attribution import attribution_latest
+        attr = attribution_latest("combo_bab_52w")
+        if attr and not attr.get("error"):
+            lines.append("🔬 最近调仓归因:")
+            lines.append(f"  {attr['from']}→{attr['to']} 收益 {attr['ret']}%"
+                         + (" (持仓≈重放)" if attr.get("approx") else ""))
+            lines.append(f"  多头 {attr['r_long_pct']:+.3f}% | 空头 {attr['r_short_pct']:+.3f}%"
+                         f" | 资金费 {attr['funding_pct']:+.3f}% | 残差 {attr['residual_pct']:+.3f}%")
+            ics = {k: v for k, v in (attr.get("factor_ic") or {}).items() if v is not None}
+            if ics:
+                ranked = sorted(ics.items(), key=lambda x: -abs(x[1]))
+                lines.append("  因子IC: " + "  ".join(f"{k}={v:+.2f}" for k, v in ranked))
+            if attr.get("coin_contrib"):
+                top = sorted(attr["coin_contrib"].items(), key=lambda x: -abs(x[1]))[:3]
+                lines.append("  贡献币: " + "  ".join(f"{c}={v:+.2f}%" for c, v in top))
+    except Exception:
+        pass
     lines.append("来源: Vibe-Trading 策略流水线工作台 /workbench")
     return "\n".join(lines)
 
