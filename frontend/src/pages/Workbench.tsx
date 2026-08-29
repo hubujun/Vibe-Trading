@@ -215,7 +215,9 @@ export function Workbench() {
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [tier, setTier] = useState<"academic" | "mined" | "combo">("academic");
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    try { return window.localStorage.getItem("qa-wb-strategy") ?? ""; } catch { return ""; }
+  });
   // 阶段浏览: 中间显示当前查看的阶段, 左右相邻可点击切换 (默认跟随策略当前阶段)
   const [viewStage, setViewStage] = useState<string>("research");
   // 详情面板: 全部默认展开 — 阶段浏览到哪个阶段, 对应详情直接展示全貌 (可手动收起)
@@ -250,11 +252,25 @@ export function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 综合排序 (有信号优先 → 净值高优先 → 调仓样本多优先) — select options 与默认选中共用
+  const sortedStrategies = useMemo(() => {
+    if (!data?.strategies) return [] as WorkbenchStrategy[];
+    return [...data.strategies].sort((a, b) => {
+      const na = a.paper?.nav ?? 1, nb = b.paper?.nav ?? 1;
+      const ta = a.paper?.trades?.length ?? 0, tb = b.paper?.trades?.length ?? 0;
+      const da = a.paper?.last_signal_date ?? "", db = b.paper?.last_signal_date ?? "";
+      if (!!da !== !!db) return da ? -1 : 1;
+      if (na !== nb) return nb - na;
+      if (ta !== tb) return tb - ta;
+      return String(a.strategy_id).localeCompare(String(b.strategy_id));
+    });
+  }, [data]);
+
   const strategy: WorkbenchStrategy | undefined =
-    data?.strategies.find(s => s.strategy_id === selectedId) ?? data?.strategies[0];
-  // 默认选中第一个策略
+    sortedStrategies.find(s => s.strategy_id === selectedId) ?? sortedStrategies[0];
+  // 默认选中排序第一个 (无持久化选择时); 选择持久化到 localStorage
   useEffect(() => {
-    if (!selectedId && data?.strategies?.length) setSelectedId(data.strategies[0].strategy_id);
+    if (!selectedId && sortedStrategies.length) setSelectedId(sortedStrategies[0].strategy_id);
   }, [data, selectedId]);
   // 切换策略时, 阶段浏览重置为该策略当前所处阶段
   useEffect(() => {
@@ -505,22 +521,15 @@ export function Workbench() {
             <>
               <span className="text-xs text-muted-foreground">策略:</span>
               <select
-                value={selectedId || data.strategies[0].strategy_id}
-                onChange={e => setSelectedId(e.target.value)}
+                value={selectedId || sortedStrategies[0]?.strategy_id || ""}
+                onChange={e => {
+                  setSelectedId(e.target.value);
+                  try { window.localStorage.setItem("qa-wb-strategy", e.target.value); } catch { /* ignore */ }
+                }}
                 className="h-8 min-w-[280px] max-w-[640px] rounded-lg border border-border bg-card px-3 text-xs font-medium text-foreground outline-none hover:border-cyan-500/40 focus:border-cyan-500/50"
                 title="按综合效果排序: 有信号优先 → 净值高优先 → 调仓样本多优先"
               >
-                {[...data.strategies]
-                  .sort((a, b) => {
-                    const na = a.paper?.nav ?? 1, nb = b.paper?.nav ?? 1;
-                    const ta = a.paper?.trades?.length ?? 0, tb = b.paper?.trades?.length ?? 0;
-                    const da = a.paper?.last_signal_date ?? "", db = b.paper?.last_signal_date ?? "";
-                    if (!!da !== !!db) return da ? -1 : 1;
-                    if (na !== nb) return nb - na;
-                    if (ta !== tb) return tb - ta;
-                    return 0;
-                  })
-                  .map(s => {
+                {sortedStrategies.map(s => {
                     const nav = s.paper?.nav != null ? s.paper.nav.toFixed(4) : "--";
                     const nt = s.paper?.trades?.length ?? 0;
                     const sig = s.paper?.last_signal_date ? ` · 信号${s.paper.last_signal_date}` : " · 待首个信号";
