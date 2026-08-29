@@ -576,28 +576,94 @@ def _duplicate_factor_check(panel: dict[str, pd.DataFrame], factors: list[str],
     return None
 
 
-def run_stress_test(cache_path: Path = CACHE_PATH,
-                    panel: dict[str, pd.DataFrame] | None = None) -> dict[str, Any]:
-    """机构实践: 压力测试 — BTC 单日大跌 >5% 的危机窗口内, 评估已晋升变体的抗跌性.
+STRESS_SCENARIOS = ("crash", "liquidity", "flash", "macro", "all")
 
+
+def _find_stress_windows(scenario: str,
+                         panel: dict[str, pd.DataFrame]) -> list[tuple[pd.Timestamp, pd.DataFrame]]:
+    """按场景发现压力窗口 (窗口 = 事件日 ±2/+3 天, 复用原有评估逻辑).
+
+    crash      — BTC 单日跌 >5% (原有)
+    liquidity  — BTC 跌 >3% 且全市场成交量中位数 < 前20日均量 60% (流动性危机)
+    flash      — 任一币单日跌 >30% (单币闪崩)
+    macro      — macro_events.json 中 A 级事件日期 (宏观冲击)
+    all        — 全部合并
+    """
+    close = panel["close"]
+    btc = close["BTC-USDT"] if "BTC-USDT" in close.columns else close.mean(axis=1)
+    daily = btc.pct_change()
+    windows: list[tuple[pd.Timestamp, pd.DataFrame]] = []
+
+    def _add(d: pd.Timestamp) -> None:
+        seg = close.loc[d - pd.Timedelta(days=2): d + pd.Timedelta(days=3)]
+        if len(seg) >= 3:
+            windows.append((d, seg))
+
+    if scenario in ("crash", "all"):
+        for d, v in daily.items():
+            if v < -0.05:
+                _add(d)
+
+    if scenario in ("liquidity", "all"):
+        vol = panel.get("volume")
+        if vol is not None:
+            vol_med = vol.median(axis=1)
+            vol_ma = vol_med.rolling(20).mean()
+            for d, v in daily.items():
+                try:
+                    if v < -0.03 and vol_med.get(d, float("inf")) < vol_ma.get(d, 1.0) * 0.6:
+                        _add(d)
+                except Exception:  # noqa: BLE001
+                    continue
+
+    if scenario in ("flash", "all"):
+        rets = close.pct_change()
+        for c in close.columns:
+            for d, v in rets[c].items():
+                if v < -0.30:
+                    _add(d)
+
+    if scenario in ("macro", "all"):
+        try:
+            import json as _json
+            ev = _json.loads(
+                (Path.home() / ".vibe-trading" / "macro_events.json").read_text(encoding="utf-8"))
+            for e in ev.get("events", []):
+                if str(e.get("level", "")).upper() == "A":
+                    _add(pd.Timestamp(e["date"]))
+        except Exception:  # noqa: BLE001
+            pass
+
+    seen: set[pd.Timestamp] = set()
+    out: list[tuple[pd.Timestamp, pd.DataFrame]] = []
+    for d, seg in windows:
+        if d not in seen:
+            seen.add(d)
+            out.append((d, seg))
+    return out
+
+
+def run_stress_test(cache_path: Path = CACHE_PATH,
+                    panel: dict[str, pd.DataFrame] | None = None,
+                    scenario: str = "crash") -> dict[str, Any]:
+    """机构实践: 压力测试 — 多场景危机窗口内评估已晋升变体的抗跌性.
+
+    场景: crash(原有 BTC 崩盘) / liquidity(流动性危机) / flash(单币闪崩) /
+          macro(宏观事件) / all.
     对 testing/validated/monitoring 变体: 用窗口起点因子得分选多空腿,
     计算窗口内组合收益 (等权, 含成本). 最差窗口收益 < -15% → 压力不通过 (rejected).
     """
+    if scenario not in STRESS_SCENARIOS:
+        return {"error": f"未知场景 {scenario}, 可选: {STRESS_SCENARIOS}"}
     if panel is None:
         panel = fetch_panel()
     if panel is None:
         return {"error": "panel fetch failed", "windows": [], "results": []}
     close = panel["close"]
     btc = close["BTC-USDT"] if "BTC-USDT" in close.columns else close.mean(axis=1)
-    daily = btc.pct_change()
-    crash_days = [d for d, v in daily.items() if v < -0.05]
-    windows: list[tuple[pd.Timestamp, pd.DataFrame]] = []
-    for d in crash_days:
-        seg = close.loc[d - pd.Timedelta(days=2): d + pd.Timedelta(days=3)]
-        if len(seg) >= 3:
-            windows.append((d, seg))
+    windows = _find_stress_windows(scenario, panel)
     if not windows:
-        return {"windows": [], "results": [], "note": "数据范围内无 BTC 单日跌>5% 窗口"}
+        return {"windows": [], "results": [], "note": f"数据范围内无 {scenario} 场景窗口"}
 
     registry = HypothesisRegistry(HYPOTHESES_PATH)
     cache = load_backtest_cache() if cache_path == CACHE_PATH else _read_cache(cache_path)
@@ -676,7 +742,7 @@ def run_stress_test(cache_path: Path = CACHE_PATH,
                     status="rejected",
                     invalidation_notes=(
                         f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
-                        f"压力测试不通过 — BTC 崩盘窗口 ({worst_day.date()}) 组合收益 {worst*100:.1f}%"
+                        f"压力测试({scenario})不通过 — {scenario} 窗口 ({worst_day.date()}) 组合收益 {worst*100:.1f}%"
                     ),
                 )
             except Exception:  # noqa: BLE001
@@ -872,11 +938,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--stress-only", action="store_true",
-        help="只跑压力测试 (BTC 崩盘窗口评估已晋升变体, 最差窗口<-15% 自动否决)",
+        help="只跑压力测试 (场景见 --stress-scenario)",
+    )
+    parser.add_argument(
+        "--stress-scenario", choices=list(STRESS_SCENARIOS), default="crash",
+        help="压力场景: crash(默认)/liquidity/flash/macro/all",
     )
     args = parser.parse_args()
     if args.stress_only:
-        result = run_stress_test()
+        result = run_stress_test(scenario=args.stress_scenario)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         result = run_variant_backtests(max_per_run=args.max_per_run)
