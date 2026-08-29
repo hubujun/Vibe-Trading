@@ -394,6 +394,16 @@ def register_workbench_routes(
         require_auth = h.require_auth
 
     @app.get(
+        "/api/factors/health",
+        dependencies=[Depends(require_auth)],
+    )
+    def factor_health(force: bool = False) -> dict[str, Any]:
+        """因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照 (缓存 6h)."""
+        from src.strategy.factor_health import compute_factor_health
+
+        return compute_factor_health(force=force)
+
+    @app.get(
         "/api/workbench",
         response_model=WorkbenchResponse,
         dependencies=[Depends(require_auth)],
