@@ -56,6 +56,9 @@ FACTOR_POOL: list[str] = [
     "volume_flow_momentum",
     "volume_confirmed_momentum",
     "open_volume_reversal",
+    # 市场状态因子 (事件/regime 代理, 可回测)
+    "market_regime_momentum",
+    "market_regime_volatility",
 ]
 
 #: 学术因子池 — academic zoo 除组合基座 (BAB/high52w) 外的可探索因子
