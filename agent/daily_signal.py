@@ -37,6 +37,10 @@ BAND_KEEP_RATIO = 0.67
 
 #: 永续合约资金费率 (OKX: 0.01%/8h 基准 = 0.03%/天; 多头付/空头收)
 FUNDING_RATE_DAY = 0.0003
+
+#: 信号逻辑版本 — 信号/记账逻辑变更时 +1, 每笔调仓记录版本 (复盘可按版本分组)
+#: v1: 静态权重 + 动态多空比 + 板块上限 + 波动率目标 + 事件/regime (与回测一致)
+SIGNAL_LOGIC_VERSION = 1
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
@@ -304,6 +308,7 @@ def build_signal(strategy: dict) -> dict:
                         'funding_paid': round(funding_paid * 100, 3),
                         'funding_received': round(funding_received * 100, 3),
                         'funding_net': round(net_funding * 100, 3),
+                        'logic_version': SIGNAL_LOGIC_VERSION,  # 逻辑版本标记
                     })
         except Exception as e:
             print('  track 更新失败:', e)
@@ -314,6 +319,21 @@ def build_signal(strategy: dict) -> dict:
     state['scores'] = {c: round(float(v), 3) for c, v in last_scores.items()}
     if state['started_at'] is None:
         state['started_at'] = str(last_date.date())
+    # append-only 保护: 新 trades 必须是旧 trades 的前缀扩展 —
+    # 任何非追加方式的修改 (覆盖/删除历史) 拒绝写入, 防止迭代 bug 污染模拟盘数据
+    if os.path.exists(state_path):
+        try:
+            old = json.load(open(state_path))
+            old_trades = old.get('trades') or []
+            new_trades = state.get('trades') or []
+            if old_trades and new_trades[:len(old_trades)] != old_trades:
+                raise RuntimeError(
+                    'trades 被非追加方式修改 (历史被覆盖/删除)! 拒绝写入, 防止数据污染'
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
     json.dump(state, open(state_path, 'w'), ensure_ascii=False, indent=2)
 
     # 事件/regime 摘要 (无历史持仓时也有值)
