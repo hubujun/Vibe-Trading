@@ -303,6 +303,8 @@ def build_signal(strategy: dict) -> dict:
                     state['trades'].append({
                         'from': str(prev_day), 'to': str(last_day),
                         'ret': round(net * 100, 2),
+                        'longs': list(state['last_longs']),   # 这笔收益的实际持仓快照 (归因用)
+                        'shorts': list(state['last_shorts']),
                         'exposure_multiplier': round(mult, 3),
                         'event_multiplier': round(event_mult, 3),
                         'regime': regime["regime"],
