@@ -175,13 +175,24 @@ const TERMS: Record<string, string> = {
   oos: "OOS 样本外：没用过的数据（未来数据），防过拟合的关键",
 };
 
-// 假设状态 → 中文标签 (UI 展示)
+//: 假设状态 → 中文标签 (UI 展示)
 const STATUS_LABEL: Record<string, string> = {
   exploring: "探索中",
   testing: "验证中",
   validated: "已验证",
   monitoring: "观察中",
   rejected: "已否决",
+};
+
+//: 执行层 (autopilot) 流水线阶段 → 中文标签
+const PIPELINE_PHASE_LABEL: Record<string, string> = {
+  idle: "待机",
+  collecting: "收集行情",
+  discovering: "发现机会",
+  backtesting: "回测",
+  paper_trading: "纸面交易",
+  live: "真实交易",
+  feedback: "反馈",
 };
 
 /** 术语徽标: 词 + 问号, hover 显示白话解释. */
@@ -431,7 +442,7 @@ export function Workbench() {
       { label: "引擎存活", value: autopilot?.health.alive ? "是" : "否", color: autopilot?.health.alive ? "text-emerald-400" : "text-rose-400" },
       { label: "熔断", value: autopilot?.halt.halted ? "已触发" : "无", color: autopilot?.halt.halted ? "text-rose-400" : "text-emerald-400" },
       { label: "今日订单", value: autopilot ? `${autopilot.counter.count} / ${autopilot.config.max_trades_per_day}` : "--" },
-      { label: "流水线", value: autopilot ? (PHASE_META[autopilot.pipeline.phase]?.label ?? autopilot.pipeline.phase) : "--" },
+      { label: "流水线", value: autopilot ? (PIPELINE_PHASE_LABEL[autopilot.pipeline.phase] ?? autopilot.pipeline.phase) : "--" },
     ],
     review: [
       { label: "vs 回测", value: review?.vs_backtest?.outperforming == null ? "样本不足" : review.vs_backtest!.outperforming ? "跑赢" : "跑输", color: review?.vs_backtest?.outperforming ? "text-emerald-400" : review?.vs_backtest?.outperforming == null ? undefined : "text-rose-400" },
@@ -1325,7 +1336,7 @@ export function Workbench() {
                   </div>
                   <div className="rounded-lg border border-border/60 p-3">
                     <div className="text-[11px] text-muted-foreground">流水线阶段</div>
-                    <div className="font-mono text-lg font-bold mt-0.5">{PHASE_META[autopilot.pipeline.phase]?.label ?? autopilot.pipeline.phase}</div>
+                    <div className="font-mono text-lg font-bold mt-0.5">{PIPELINE_PHASE_LABEL[autopilot.pipeline.phase] ?? autopilot.pipeline.phase}</div>
                   </div>
                   <div className="rounded-lg border border-border/60 p-3">
                     <div className="text-[11px] text-muted-foreground">今日订单</div>
