@@ -148,11 +148,14 @@ def _apply_band(new_longs: list[str], new_shorts: list[str],
     """机构实践: 调仓缓冲 — 新旧持仓重叠 ≥ 阈值则不调仓 (省换手/成本)."""
     if not old_longs or not old_shorts:
         return new_longs, new_shorts, False
-    n = max(1, len(new_longs))
-    keep = min(max(1, int(n * keep_ratio)), n - 1)
+    # 多空 n 可能不同 (动态多空比) — 分别算保持阈值
+    n_l = max(1, len(new_longs))
+    keep_l = min(max(1, int(n_l * keep_ratio)), n_l)
+    n_s = max(1, len(new_shorts))
+    keep_s = min(max(1, int(n_s * keep_ratio)), n_s)
     ol = len(set(new_longs) & set(old_longs))
     os_ = len(set(new_shorts) & set(old_shorts))
-    if ol >= keep and os_ >= keep:
+    if ol >= keep_l and os_ >= keep_s:
         return old_longs, old_shorts, True
     return new_longs, new_shorts, False
 
