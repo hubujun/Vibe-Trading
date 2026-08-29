@@ -340,7 +340,7 @@ def build_signal(strategy: dict) -> dict:
     state['last_signal_date'] = str(last_date.date())
     state['last_longs'] = longs
     state['last_shorts'] = shorts
-    state['scores'] = {c: round(float(last_scores[c]), 3) for c in longs + shorts}
+    state['scores'] = {c: round(float(v), 3) for c, v in last_scores.items()}
     if state['started_at'] is None:
         state['started_at'] = str(last_date.date())
     json.dump(state, open(state_path, 'w'), ensure_ascii=False, indent=2)
