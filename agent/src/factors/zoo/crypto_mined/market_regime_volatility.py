@@ -16,7 +16,7 @@ from src.factors.base import decay_linear, scale, ts_rank
 __alpha_meta__ = {
     "id": "crypto_mined_market_regime_volatility",
     "nickname": "MarketRegimeVolatility",
-    "theme": ["regime", "volatility"],
+    "theme": ["volatility"],
     "formula_latex": r"-\mathrm{scale}\left(\mathrm{rank}_{20}(\sigma_i)\cdot\sigma_{BTC,20}\right)",
     "columns_required": ["close"],
     "universe": ["crypto"],
