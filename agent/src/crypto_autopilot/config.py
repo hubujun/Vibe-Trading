@@ -39,6 +39,8 @@ _DEFAULT_PAIRS: tuple[str, ...] = (
     "UNI-USDT",
     "APT-USDT",
     "ARB-USDT",
+    "TRUMP-USDT",
+    "LAB-USDT",
 )
 
 

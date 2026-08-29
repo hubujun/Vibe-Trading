@@ -55,12 +55,13 @@ HOME = Path.home()
 CACHE_PATH = HOME / ".vibe-trading" / "runs" / "paper_combo" / "variant_backtests.json"
 HYPOTHESES_PATH = HOME / ".vibe-trading" / "hypotheses.json"
 
-#: 币种 universe (与 daily_signal/autopilot 一致) — 15 个主流+次主流 USDT 对
+#: 币种 universe (与 daily_signal/autopilot 一致) — 17 个主流+次主流 USDT 对
 #: 覆盖公链/平台币/DeFi/预言机/meme 多板块, 均 OKX 永续 + 历史数据够 800 天回测
 SYMBOLS = [
     "BTC-USDT", "ETH-USDT", "SOL-USDT", "BNB-USDT", "XRP-USDT",
     "DOGE-USDT", "OKB-USDT", "ADA-USDT", "AVAX-USDT", "LINK-USDT",
     "LTC-USDT", "DOT-USDT", "UNI-USDT", "APT-USDT", "ARB-USDT",
+    "TRUMP-USDT", "LAB-USDT",
 ]
 DAYS = 800
 COST = 0.001
@@ -399,8 +400,11 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
     p = _STRATEGIES_PATH
     try:
         data = _json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # 首次播种: 文件不存在是合法场景
+        data = {"strategies": []}
     except (OSError, ValueError, TypeError):
-        # 读取失败绝不能静默覆盖 — 会把 strategies.json 清成只剩新播种的 1 条
+        # 文件存在但读取失败/损坏 — 绝不能静默覆盖 (会把 strategies.json 清空)
         logger.error("auto-seed 中止: strategies.json 读取失败 (%s)", p)
         return None
     sids = [str(s.get("signal_definition", "")) for s in data.get("strategies", [])]
