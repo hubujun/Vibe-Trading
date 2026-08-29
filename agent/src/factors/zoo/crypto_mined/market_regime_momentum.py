@@ -16,7 +16,7 @@ from src.factors.base import decay_linear, scale, ts_rank
 __alpha_meta__ = {
     "id": "crypto_mined_market_regime_momentum",
     "nickname": "MarketRegimeMomentum",
-    "theme": ["regime", "momentum"],
+    "theme": ["momentum"],
     "formula_latex": r"\mathrm{scale}\left(\mathrm{rank}_{20}(\Delta C/C)\cdot\left(1+4\cdot\mathrm{rank}(mom_{BTC,20})\right)\right)",
     "columns_required": ["close"],
     "universe": ["crypto"],
