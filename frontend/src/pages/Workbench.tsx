@@ -540,6 +540,10 @@ export function Workbench() {
             <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-semibold", PHASE_META[effectivePhase].bg, PHASE_META[effectivePhase].color)}>
               {isPaused ? "已暂停" : PHASE_META[effectivePhase].label}
             </span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-500">
+              横截面相对价值
+              <Term k="crossSection" />
+            </span>
             <span className="text-xs text-muted-foreground">
               因子: {strategy.factors.join(" + ")} · 权重: {Object.entries(strategy.weights).map(([k, v]) => `${k} ${v * 100}%`).join(" / ")}
             </span>
