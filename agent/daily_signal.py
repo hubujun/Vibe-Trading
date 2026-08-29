@@ -21,6 +21,7 @@ from src.strategy.macro_events import (
     get_regime,
     market_state_features,
 )
+from src.strategy.variant_backtester import SECTOR, SECTOR_CAP, VOL_TARGET, _sector_cap
 
 SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT',
@@ -31,24 +32,9 @@ COST = 0.001
 #: 无现货、只有永续的币 → 蜡烛用永续 instId (LAB 2025-11 上市, 无现货交易对)
 PERP_ONLY = {"LAB-USDT": "LAB-USDT-SWAP"}
 
-#: 币种板块映射 (机构实践: 组合构建时控制板块暴露)
-SECTOR = {
-    "BTC-USDT": "chain", "ETH-USDT": "chain", "SOL-USDT": "chain",
-    "XRP-USDT": "chain", "ADA-USDT": "chain", "AVAX-USDT": "chain",
-    "LTC-USDT": "chain", "DOT-USDT": "chain", "APT-USDT": "chain",
-    "ARB-USDT": "chain",
-    "BNB-USDT": "cex", "OKB-USDT": "cex",
-    "UNI-USDT": "defi", "LINK-USDT": "defi",
-    "DOGE-USDT": "meme", "TRUMP-USDT": "meme", "LAB-USDT": "meme",
-}
-#: 同板块最多入选数 (防 meme/单板块权重过度集中)
-SECTOR_CAP = 2
-
 #: 调仓缓冲: 新旧持仓重叠 ≥ 此比例则不调仓 (省换手/成本)
 BAND_KEEP_RATIO = 0.67
 
-#: 组合波动率目标 (年化): 滚动波动率高于目标自动缩仓
-VOL_TARGET = 0.25
 #: 永续合约资金费率 (OKX: 0.01%/8h 基准 = 0.03%/天; 多头付/空头收)
 FUNDING_RATE_DAY = 0.0003
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
@@ -152,21 +138,6 @@ def _ic_ir_weights(factor_values: dict, close_df, lookback: int = 60):
     return {fid: (v or 0.0) / total for fid, v in out.items()}
 
 
-def _sector_cap(ranking: list[str], n: int, cap: int = SECTOR_CAP) -> list[str]:
-    """机构实践: 板块权重上限 — 从强到弱选 n 个, 同板块最多 cap 个."""
-    picked: list[str] = []
-    counts: dict[str, int] = {}
-    for sym in ranking:
-        sec = SECTOR.get(sym, "other")
-        if counts.get(sec, 0) >= cap:
-            continue
-        picked.append(sym)
-        counts[sec] = counts.get(sec, 0) + 1
-        if len(picked) >= n:
-            break
-    return picked
-
-
 def _apply_band(new_longs: list[str], new_shorts: list[str],
                 old_longs: list[str], old_shorts: list[str],
                 keep_ratio: float = BAND_KEEP_RATIO):
@@ -228,9 +199,10 @@ def build_signal(strategy: dict) -> dict:
     volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
 
     # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
+    # 注意: 权重必须与 backtest_variant 一致 (静态权重) — 实盘行为 = 回测行为
+    # (IC_IR 动态加权仅实盘会导致回测评估的策略实盘跑不同逻辑, 已移除)
     from src.strategy.variant_backtester import ACADEMIC_MODULES
 
-    factor_values: dict[str, pd.DataFrame] = {}
     score = None
     total_w = 0.0
     for fid in factors:
@@ -246,24 +218,9 @@ def build_signal(strategy: dict) -> dict:
         f = f.reindex(close_df.index)
         if fid not in ACADEMIC_MODULES:
             f = _row_zscore(f)
-        factor_values[fid] = f
         w = weights.get(fid, 1.0 / len(factors))
         score = f * w if score is None else score.add(f * w, fill_value=0)
         total_w += w
-    # 机构实践: IC_IR 加权 — 因子权重 ∝ 滚动 IC 稳定性 (替代静态等权)
-    ic_weights = _ic_ir_weights(factor_values, close_df)
-    if ic_weights is not None:
-        score = None
-        total_w = 0.0
-        for fid in factors:
-            f = factor_values.get(fid)
-            if f is None:
-                continue
-            w = ic_weights.get(fid, 0.0)
-            if w <= 0:
-                continue
-            score = f * w if score is None else score.add(f * w, fill_value=0)
-            total_w += w
     if score is None or total_w <= 0:
         return {'error': '无可用因子'}
     score = score / total_w
@@ -293,6 +250,11 @@ def build_signal(strategy: dict) -> dict:
         longs, shorts,
         prev_state.get('last_longs', []), prev_state.get('last_shorts', []),
     )
+    if held:
+        # band 保持持仓时也要应用动态多空比: 截断到当前 regime 的 n
+        # (否则牛市 3+3→3+2 后重叠≥阈值导致减空头永不生效)
+        longs = longs[:top_n_eff]
+        shorts = shorts[:bot_n_eff]
 
     # 追踪组合表现: 从上一次信号日起
     state = {'started_at': None, 'nav': 1.0, 'last_signal_date': None,

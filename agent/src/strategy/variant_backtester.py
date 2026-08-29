@@ -68,6 +68,37 @@ SYMBOLS = [
 PERP_ONLY: dict[str, str] = {
     "LAB-USDT": "LAB-USDT-SWAP",
 }
+
+#: 币种板块映射 (机构实践: 组合构建时控制板块暴露) — 单源定义, daily_signal 复用
+SECTOR: dict[str, str] = {
+    "BTC-USDT": "chain", "ETH-USDT": "chain", "SOL-USDT": "chain",
+    "XRP-USDT": "chain", "ADA-USDT": "chain", "AVAX-USDT": "chain",
+    "LTC-USDT": "chain", "DOT-USDT": "chain", "APT-USDT": "chain",
+    "ARB-USDT": "chain",
+    "BNB-USDT": "cex", "OKB-USDT": "cex",
+    "UNI-USDT": "defi", "LINK-USDT": "defi",
+    "DOGE-USDT": "meme", "TRUMP-USDT": "meme", "LAB-USDT": "meme",
+}
+#: 同板块最多入选数 (防 meme/单板块权重过度集中)
+SECTOR_CAP = 2
+
+#: 组合波动率目标 (年化) — 回测/实盘一致的连续风控
+VOL_TARGET = 0.25
+
+
+def _sector_cap(ranking: list[str], n: int, cap: int = SECTOR_CAP) -> list[str]:
+    """板块权重上限 — 从强到弱选 n 个, 同板块最多 cap 个 (与 daily_signal 一致)."""
+    picked: list[str] = []
+    counts: dict[str, int] = {}
+    for sym in ranking:
+        sec = SECTOR.get(sym, "other")
+        if counts.get(sec, 0) >= cap:
+            continue
+        picked.append(sym)
+        counts[sec] = counts.get(sec, 0) + 1
+        if len(picked) >= n:
+            break
+    return picked
 DAYS = 800
 COST = 0.001
 PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
@@ -284,34 +315,41 @@ def backtest_variant(
         return {"error": "no usable factors"}
     combo = score_sum / weight_sum
 
-    # 多 top_n 空 bot_n (head/tail 精确截取) — 支持按日动态多空比
+    # 多 top_n 空 bot_n — 逐日选币, 与 daily_signal 完全一致:
+    #   动态多空比 (牛市减空/熊市减多) + 板块上限 (同板块最多 SECTOR_CAP 个)
     r = combo.rank(axis=1, method="first")
     n = close.shape[1]
-    if dynamic_n and "BTC-USDT" in close.columns and n >= 5:
-        # 温和版动态多空比: 按日 BTC 20d 动量 (与 daily_signal regime 同阈值)
-        btc = close["BTC-USDT"]
-        mom = btc.pct_change(20)
-        top_eff = pd.Series(top_n, index=close.index).astype(float)
-        bot_eff = pd.Series(bot_n, index=close.index).astype(float)
-        risk_on = mom >= 0.04
-        risk_off = mom <= -0.04
-        bot_eff[risk_on] = max(1.0, float(bot_n - 1))    # 牛市: 减 1 空头
-        top_eff[risk_off] = max(1.0, float(top_n - 1))   # 熊市: 减 1 多头
-        top_eff = top_eff.clip(upper=float(n))
-        bot_eff = bot_eff.clip(upper=float(n))
-        long_mask = r.gt(n - top_eff, axis=0)
-        short_mask = r.le(bot_eff, axis=0)
+    if "BTC-USDT" in close.columns:
+        btc_mom = close["BTC-USDT"].pct_change(20)
     else:
-        top_n_eff = min(top_n, n)
-        bot_n_eff = min(bot_n, n)
-        long_mask = r > n - top_n_eff
-        short_mask = r <= bot_n_eff
-    w = long_mask.astype(float) - short_mask.astype(float)
+        btc_mom = pd.Series(0.0, index=close.index)
+    w = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+    for dt in close.index:
+        row = combo.loc[dt].dropna().sort_values(ascending=False)
+        if len(row) < 4:
+            continue
+        mom = btc_mom.get(dt, 0.0)
+        if pd.isna(mom):
+            tn, bn = top_n, bot_n
+        elif mom >= 0.04:
+            tn, bn = top_n, max(1, bot_n - 1)          # 牛市: 减 1 空头
+        elif mom <= -0.04:
+            tn, bn = max(1, top_n - 1), bot_n          # 熊市: 减 1 多头
+        else:
+            tn, bn = top_n, bot_n
+        longs = _sector_cap(row.index.tolist(), tn)
+        shorts = _sector_cap(row.index.tolist()[::-1], bn)
+        w.loc[dt, longs] = 1.0
+        w.loc[dt, shorts] = -1.0
     w = w.div(w.abs().sum(axis=1), axis=0)
 
     daily = (w.shift(1) * rets).sum(axis=1)
     turnover = w.diff().abs().sum(axis=1) / 2
-    net = daily - turnover * COST
+    # 波动率目标 (与 daily_signal 一致): 组合滚动波动率 >25% 年化自动缩仓
+    vol = daily.rolling(20).std() * math.sqrt(252)
+    vol_mult = (VOL_TARGET / vol.replace(0, float("nan"))).clip(0.3, 1.5)
+    vol_mult = vol_mult.shift(1).fillna(1.0)
+    net = daily * vol_mult - turnover * COST
     nav = (1 + net.fillna(0)).cumprod()
     total = float(nav.iloc[-1] - 1)
     years = len(nav) / 365
