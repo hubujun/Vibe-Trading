@@ -198,14 +198,21 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
 
 
 def fetch_panel() -> dict[str, pd.DataFrame] | None:
-    """拉 10 币 panel (close + volume), 对齐后返回; 数据不足返回 None."""
+    """拉 17 币 panel (close + volume), 对齐后返回; 数据不足返回 None.
+
+    新上市币 (TRUMP/LAB 等 <800 天历史) 自动跳过, 不阻断整体.
+    """
     frames: dict[str, pd.DataFrame] = {}
     for s in SYMBOLS:
         df = fetch_okx_daily(s)
-        if df is None:
-            return None
+        if df is None or len(df) < 300:
+            print(f"  [fetch_panel] {s} 数据不足, 跳过")
+            time.sleep(0.3)
+            continue
         frames[s] = df
         time.sleep(0.3)
+    if len(frames) < 4:
+        return None
     close = pd.DataFrame({s: f["close"] for s, f in frames.items()})
     volume = pd.DataFrame({s: f["volume"] for s, f in frames.items()})
     close = close.dropna(axis=1, how="all").ffill().dropna()
@@ -358,7 +365,9 @@ def _load_base_metrics(cache: dict[str, dict[str, Any]], panel: dict[str, pd.Dat
         调用方需对已缓存变体重判晋升状态.
     """
     base = cache.get(_BASE_CACHE_KEY)
-    if base and base.get("universe_size") == len(SYMBOLS):
+    # 用 panel 实际币数 (新上市币数据不足被跳过时 universe_size 变小)
+    actual_universe = len(panel.get("close", pd.DataFrame()).columns)
+    if base and base.get("universe_size") == actual_universe:
         return base, False
     m = backtest_variant(panel, _BASE_SIGNAL["factors"], _BASE_SIGNAL["weights"], 3, 3)
     if "error" in m:
@@ -459,6 +468,134 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
     return sid
 
 
+def _duplicate_factor_check(panel: dict[str, pd.DataFrame], factors: list[str],
+                            corr_threshold: float = 0.9) -> str | None:
+    """机构实践: 因子相关性去重 — 新增因子与基座因子 |截面相关|>阈值 → 冗余.
+
+    返回冗余因子名 (无增量 alpha, 该变体直接否决); 无冗余返回 None.
+    """
+    base = [f for f in factors if f in ("BAB", "high52w")]
+    new = [f for f in factors if f not in ("BAB", "high52w")]
+    if not base or not new:
+        return None
+    vals: dict[str, pd.DataFrame] = {}
+    for fid in factors:
+        mod = load_factor_module(fid)
+        if mod is None:
+            return None
+        try:
+            vals[fid] = mod.compute(panel).reindex(panel["close"].index).ffill()
+        except Exception:  # noqa: BLE001
+            return None
+    for nf in new:
+        for bf in base:
+            if nf not in vals or bf not in vals:
+                continue
+            c = float(vals[nf].corrwith(vals[bf], axis=1).mean())
+            if abs(c) > corr_threshold:
+                return nf
+    return None
+
+
+def run_stress_test(cache_path: Path = CACHE_PATH,
+                    panel: dict[str, pd.DataFrame] | None = None) -> dict[str, Any]:
+    """机构实践: 压力测试 — BTC 单日大跌 >5% 的危机窗口内, 评估已晋升变体的抗跌性.
+
+    对 testing/validated/monitoring 变体: 用窗口起点因子得分选多空腿,
+    计算窗口内组合收益 (等权, 含成本). 最差窗口收益 < -15% → 压力不通过 (rejected).
+    """
+    if panel is None:
+        panel = fetch_panel()
+    if panel is None:
+        return {"error": "panel fetch failed", "windows": [], "results": []}
+    close = panel["close"]
+    btc = close["BTC-USDT"] if "BTC-USDT" in close.columns else close.mean(axis=1)
+    daily = btc.pct_change()
+    crash_days = [d for d, v in daily.items() if v < -0.05]
+    windows: list[tuple[pd.Timestamp, pd.DataFrame]] = []
+    for d in crash_days:
+        seg = close.loc[d - pd.Timedelta(days=2): d + pd.Timedelta(days=3)]
+        if len(seg) >= 3:
+            windows.append((d, seg))
+    if not windows:
+        return {"windows": [], "results": [], "note": "数据范围内无 BTC 单日跌>5% 窗口"}
+
+    registry = HypothesisRegistry(HYPOTHESES_PATH)
+    cache = load_backtest_cache() if cache_path == CACHE_PATH else _read_cache(cache_path)
+    results: list[dict[str, Any]] = []
+    rejected_ids: list[str] = []
+    for h in registry.list():
+        sd = str(h.signal_definition)
+        if not sd.startswith("combo_variant:") or sd not in cache:
+            continue
+        if str(h.status) not in ("testing", "validated", "monitoring"):
+            continue
+        parsed = parse_signal_definition(sd)
+        if parsed is None:
+            continue
+        worst = 0.0
+        worst_day = None
+        for d, seg in windows:
+            if len(seg) < 3:
+                continue
+            pre = close.loc[:d - pd.Timedelta(days=1)]
+            if len(pre) < 60:
+                continue
+            # 窗口起点打分: 用窗口前一天的因子截面
+            try:
+                factors = parsed["factors"]
+                weights = parsed["weights"]
+                score = None
+                tw = 0.0
+                for fid in factors:
+                    mod = load_factor_module(fid)
+                    if mod is None:
+                        continue
+                    f = mod.compute(panel).reindex(close.index)
+                    if fid not in ACADEMIC_MODULES:
+                        f = f.sub(f.mean(axis=1), axis=0).div(f.std(axis=1).replace(0, 1), axis=0)
+                    w = weights.get(fid, 1.0 / len(factors))
+                    score = f * w if score is None else score.add(f * w, fill_value=0)
+                    tw += w
+                if score is None:
+                    continue
+                row = score.loc[d - pd.Timedelta(days=1)].dropna().sort_values(ascending=False)
+                longs = row.head(parsed["top_n"]).index.tolist()
+                shorts = row.tail(parsed["bot_n"]).index.tolist()
+                rets = seg.pct_change().iloc[1:]
+                rl = rets[longs].mean(axis=1).sum()
+                rs = -rets[shorts].mean(axis=1).sum()
+                win_ret = (rl + rs) / 2 - COST
+                if win_ret < worst:
+                    worst = win_ret
+                    worst_day = d
+            except Exception:  # noqa: BLE001
+                continue
+        results.append({
+            "hypothesis_id": h.hypothesis_id,
+            "title": h.title,
+            "status": h.status,
+            "worst_window_ret": round(float(worst) * 100, 2),
+            "worst_day": str(worst_day.date()) if worst_day else None,
+            "stress_fail": bool(worst < -0.15),
+        })
+        if worst < -0.15:
+            rejected_ids.append(h.hypothesis_id)
+            try:
+                registry.update(
+                    h.hypothesis_id,
+                    status="rejected",
+                    invalidation_notes=(
+                        f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                        f"压力测试不通过 — BTC 崩盘窗口 ({worst_day.date()}) 组合收益 {worst*100:.1f}%"
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("stress: reject failed for %s", h.hypothesis_id)
+    return {"windows": [str(d.date()) for d, _ in windows], "results": results,
+            "rejected": rejected_ids}
+
+
 def run_variant_backtests(
     *,
     max_per_run: int = 3,
@@ -534,9 +671,26 @@ def run_variant_backtests(
 
     backtested: list[dict[str, Any]] = []
     promoted: list[dict[str, Any]] = []
+    dup_skipped: list[str] = []
     for hyp in candidates[:max_per_run]:
         parsed = parse_signal_definition(str(hyp.signal_definition))
         if parsed is None:
+            continue
+        # 机构实践: 因子相关性去重 — 新增因子与基座因子高相关 → 无增量, 直接否决
+        dup = _duplicate_factor_check(panel, parsed["factors"])
+        if dup is not None:
+            dup_skipped.append(str(hyp.signal_definition))
+            try:
+                registry.update(
+                    hyp.hypothesis_id,
+                    status="rejected",
+                    invalidation_notes=(
+                        f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                        f"因子去重 — {dup} 与基座因子截面相关 >0.9, 无增量 alpha"
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("variant backtest: dup reject failed for %s", hyp.hypothesis_id)
             continue
         metrics = backtest_variant(
             panel,
@@ -589,7 +743,8 @@ def run_variant_backtests(
         save_backtest_cache(cache)
     else:
         _write_cache(cache_path, cache)
-    return {"backtested": backtested, "promoted": promoted, "rejudged": rejudged, "skipped": max(0, len(candidates) - max_per_run)}
+    return {"backtested": backtested, "promoted": promoted, "rejudged": rejudged,
+            "dup_skipped": dup_skipped, "skipped": max(0, len(candidates) - max_per_run)}
 
 
 def _read_cache(path: Path) -> dict[str, dict[str, Any]]:
@@ -614,6 +769,16 @@ if __name__ == "__main__":
         "--max-per-run", type=int, default=20,
         help="每轮最多回测的变体数 (积压多时可调大, 默认 20)",
     )
+    parser.add_argument(
+        "--stress-only", action="store_true",
+        help="只跑压力测试 (BTC 崩盘窗口评估已晋升变体, 最差窗口<-15% 自动否决)",
+    )
     args = parser.parse_args()
-    result = run_variant_backtests(max_per_run=args.max_per_run)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if args.stress_only:
+        result = run_stress_test()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        result = run_variant_backtests(max_per_run=args.max_per_run)
+        result.pop("rejudged", None)
+        result["dup_skipped"] = result.get("dup_skipped", [])
+        print(json.dumps(result, ensure_ascii=False, indent=2))
