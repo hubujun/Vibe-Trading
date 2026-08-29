@@ -1939,6 +1939,12 @@ export interface WorkbenchResponse {
   >;
   review: WorkbenchReview;
   updated_at?: string | null;
+  /** 宏观事件/regime (第 1+2 层: 事件日历 + 市场制度) */
+  macro?: {
+    events: Array<{ date?: string; title: string; level?: string; tags?: string[] }>;
+    event_multiplier: number;
+    updated_at?: string | null;
+  };
 }
 
 /** 复盘引擎体检: 模拟盘 vs 回测. */

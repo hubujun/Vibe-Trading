@@ -212,6 +212,8 @@ export function Workbench() {
   // 流水线生命周期记录: 默认折叠 (履历是低频查看内容)
   const [openLifecycle, setOpenLifecycle] = useState(false);
   const dark = useThemeDark();
+  // 今日宏观事件 (第 1 层: 事件日历, 有事件才渲染)
+  const macroEvents = data?.macro?.events ?? [];
 
   const load = async (signal?: AbortSignal) => {
     try {
@@ -599,6 +601,22 @@ export function Workbench() {
                 <RefreshCw className="h-3 w-3 text-purple-400" />
                 循环点: 复盘 → 组合 — 基策略有效时自动生成下一代变体
               </span>
+              {/* 今日宏观事件: 第 1 层事件风控 — 事件日自动降杠杆 */}
+              {macroEvents.length ? (
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l border-border/60 pl-4">
+                  {macroEvents.map((ev, i) => (
+                    <span key={i} className="flex items-center gap-1.5">
+                      <span className={cn("rounded px-1.5 py-0.5 font-semibold", ev.level === "A" ? "bg-rose-500/20 text-rose-400" : "bg-amber-500/20 text-amber-400")}>
+                        {ev.level === "A" ? "重大" : ev.level === "B" ? "中等" : "事件"}
+                      </span>
+                      <span className="text-foreground/80">{ev.title}</span>
+                      {(data?.macro?.event_multiplier ?? 1) < 1 && (
+                        <span className="text-rose-400">→ 杠杆 ×{data?.macro?.event_multiplier}</span>
+                      )}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
               <span className="flex items-center gap-1">
                 <Undo2 className="h-3 w-3 text-amber-400" />
                 复盘 → 研究 — 回撤超限 / 连亏 3 笔时回炉
