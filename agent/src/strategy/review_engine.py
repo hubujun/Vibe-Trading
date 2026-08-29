@@ -226,6 +226,7 @@ def compute_review(
     metrics_path: Path | None = None,
     hypotheses_path: Path | None = None,
     baseline: dict[str, Any] | None = None,
+    apply_hypothesis_flow: bool = True,
 ) -> StrategyReview:
     """对 combo 策略跑一轮复盘, 返回体检 + 假设流转 + 推荐动作.
 
@@ -296,11 +297,18 @@ def compute_review(
             review.data_freshness.stale = age_days > METRICS_STALE_DAYS
 
     # --- 假设自动流转 ---
-    if hypotheses_path is not None:
+    if hypotheses_path is not None and apply_hypothesis_flow:
         try:
             registry = HypothesisRegistry(hypotheses_path)
             for hyp in registry.list():
-                update = _apply_hypothesis_rule(hyp, trades, vs)
+                # testing 假设用其对应策略的调仓判连亏 (避免跨策略串扰 —
+                # 传入的 trades 是当前被 review 策略的, 不是该假设的)
+                hyp_trades = trades
+                if str(hyp.status) == "testing":
+                    st = _strategy_state_for_sd(str(hyp.signal_definition or ""))
+                    if st is not None:
+                        hyp_trades = st.get("trades") or []
+                update = _apply_hypothesis_rule(hyp, hyp_trades, vs)
                 if update is not None:
                     _persist_hypothesis_update(registry, hyp, update, review)
         except Exception:  # noqa: BLE001 — 假设流转失败不拖垮体检
@@ -410,6 +418,24 @@ def _apply_hypothesis_rule(
             to_status="monitoring",
             reason=f"模拟盘回撤 {vs.current_dd}% 超回测最大回撤 {vs.backtest_max_dd}% 的 {DD_BREACH_MULTIPLIER} 倍, 降级观察",
         )
+    return None
+
+
+def _strategy_state_for_sd(signal_definition: str) -> dict[str, Any] | None:
+    """按 signal_definition 找对应策略的模拟盘 state (避免假设流转跨策略串扰)."""
+    if not signal_definition:
+        return None
+    try:
+        wb_path = Path.home() / ".vibe-trading" / "workbench" / "strategies.json"
+        raw = json.loads(wb_path.read_text(encoding="utf-8"))
+        for s in raw.get("strategies", []):
+            if s.get("signal_definition") == signal_definition:
+                run_dir = Path(s.get("run_dir") or "")
+                st_path = run_dir / "state.json"
+                if st_path.exists():
+                    return json.loads(st_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
     return None
 
 
