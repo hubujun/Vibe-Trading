@@ -249,8 +249,14 @@ def backtest_variant(
     weights: dict[str, float],
     top_n: int,
     bot_n: int,
+    dynamic_n: bool = True,
 ) -> dict[str, Any]:
-    """对单个变体跑回测, 返回指标 dict."""
+    """对单个变体跑回测, 返回指标 dict.
+
+    dynamic_n=True: 温和版动态多空比 — 按日 BTC 20d 动量调整:
+      牛市 (≥+4%): 3 多 + 2 空 (减空头腿); 熊市 (≤-4%): 2 多 + 3 空 (减多头腿);
+      震荡: 3 + 3 对称. 用行级 mask 实现 (每日期限不同).
+    """
     close = panel["close"]
     rets = close.pct_change()
 
@@ -278,13 +284,28 @@ def backtest_variant(
         return {"error": "no usable factors"}
     combo = score_sum / weight_sum
 
-    # 多 top_n 空 bot_n (head/tail 精确截取)
+    # 多 top_n 空 bot_n (head/tail 精确截取) — 支持按日动态多空比
     r = combo.rank(axis=1, method="first")
     n = close.shape[1]
-    top_n_eff = min(top_n, n)
-    bot_n_eff = min(bot_n, n)
-    long_mask = r > n - top_n_eff
-    short_mask = r <= bot_n_eff
+    if dynamic_n and "BTC-USDT" in close.columns and n >= 5:
+        # 温和版动态多空比: 按日 BTC 20d 动量 (与 daily_signal regime 同阈值)
+        btc = close["BTC-USDT"]
+        mom = btc.pct_change(20)
+        top_eff = pd.Series(top_n, index=close.index).astype(float)
+        bot_eff = pd.Series(bot_n, index=close.index).astype(float)
+        risk_on = mom >= 0.04
+        risk_off = mom <= -0.04
+        bot_eff[risk_on] = max(1.0, float(bot_n - 1))    # 牛市: 减 1 空头
+        top_eff[risk_off] = max(1.0, float(top_n - 1))   # 熊市: 减 1 多头
+        top_eff = top_eff.clip(upper=float(n))
+        bot_eff = bot_eff.clip(upper=float(n))
+        long_mask = r.gt(n - top_eff, axis=0)
+        short_mask = r.le(bot_eff, axis=0)
+    else:
+        top_n_eff = min(top_n, n)
+        bot_n_eff = min(bot_n, n)
+        long_mask = r > n - top_n_eff
+        short_mask = r <= bot_n_eff
     w = long_mask.astype(float) - short_mask.astype(float)
     w = w.div(w.abs().sum(axis=1), axis=0)
 
