@@ -569,6 +569,8 @@ export const api = {
     request<ComboSummary>("/api/combo/summary", { signal }),
   getWorkbench: (signal?: AbortSignal) =>
     request<WorkbenchResponse>("/api/workbench", { signal, cache: "no-store" }),
+  getFactorHealth: (force = false, signal?: AbortSignal) =>
+    request<FactorHealthResponse>(`/api/factors/health?force=${force}`, { signal, cache: "no-store" }),
   transitionStrategy: (strategyId: string, action: string, note?: string) =>
     request<WorkbenchStrategy>(`/api/workbench/strategies/${strategyId}/transition`, {
       method: "POST",
@@ -1907,6 +1909,24 @@ export interface WorkbenchStrategy {
   review?: Partial<WorkbenchReview>;
   /** 该策略自己的回测指标 (来自变体自动回测缓存) */
   strategy_backtest?: { annual?: number | null; sharpe?: number | null; max_dd?: number | null; cum?: number | null };
+}
+
+/** 因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照. */
+export interface FactorHealthResponse {
+  universe_size?: number;
+  days?: number;
+  generated_at?: string | null;
+  error?: string | null;
+  results: Array<{
+    factor: string;
+    ic: number;
+    ic_ir: number;
+    ic_pos: number;
+    ls_annual: number | null;
+    ls_sharpe: number;
+    days?: number;
+    paper_best_nav?: number | null;
+  }>;
 }
 
 /** Aggregated pipeline view: strategies + combo research + autopilot execution. */
