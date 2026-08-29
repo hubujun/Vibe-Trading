@@ -269,9 +269,18 @@ def build_signal(strategy: dict) -> dict:
     score = score / total_w
     last_date = close_df.index[-1]
     last_scores = score.iloc[-1].dropna().sort_values(ascending=False)
+    # 机构实践: 温和版动态多空比 — 按 regime 调整多空数量 (牛市减空/熊市减多)
+    # 与回测 backtest_variant(dynamic_n) 一致, 实盘行为 = 回测行为
+    regime_now = get_regime(close_df, d=last_date.date())["regime"]
+    if regime_now == "risk_on":
+        top_n_eff, bot_n_eff = top_n, max(1, bot_n - 1)
+    elif regime_now == "risk_off":
+        top_n_eff, bot_n_eff = max(1, top_n - 1), bot_n
+    else:
+        top_n_eff, bot_n_eff = top_n, bot_n
     # 机构实践: 板块权重上限 (同板块最多 SECTOR_CAP 个, 防 meme 扎堆)
-    longs = _sector_cap(last_scores.index.tolist(), top_n)
-    shorts = _sector_cap(last_scores.index.tolist()[::-1], bot_n)
+    longs = _sector_cap(last_scores.index.tolist(), top_n_eff)
+    shorts = _sector_cap(last_scores.index.tolist()[::-1], bot_n_eff)
 
     # 机构实践: 调仓缓冲 — 新旧持仓重叠 ≥ 阈值则不调仓 (省换手/成本)
     prev_state = {}
