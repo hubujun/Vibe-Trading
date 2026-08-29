@@ -28,6 +28,9 @@ SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'TRUMP-USDT', 'LAB-USDT']
 COST = 0.001
 
+#: 无现货、只有永续的币 → 蜡烛用永续 instId (LAB 2025-11 上市, 无现货交易对)
+PERP_ONLY = {"LAB-USDT": "LAB-USDT-SWAP"}
+
 #: 币种板块映射 (机构实践: 组合构建时控制板块暴露)
 SECTOR = {
     "BTC-USDT": "chain", "ETH-USDT": "chain", "SOL-USDT": "chain",
@@ -82,8 +85,10 @@ def fetch_okx_daily(symbol: str, days: int = DAYS) -> pd.DataFrame:
     proxies = {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'}
     url = 'https://www.okx.com/api/v5/market/history-candles'
     all_rows, after = [], None
+    # 无现货的币用永续 instId (LAB 只有永续)
+    inst_id = PERP_ONLY.get(symbol, symbol)
     for page in range(math.ceil(days / 100)):
-        params = {'instId': symbol, 'bar': '1D', 'limit': '100'}
+        params = {'instId': inst_id, 'bar': '1D', 'limit': '100'}
         if after:
             params['after'] = str(after)
         for attempt in range(4):
