@@ -27,6 +27,25 @@ SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'LTC-USDT', 'DOT-USDT', 'UNI-USDT', 'APT-USDT', 'ARB-USDT',
             'TRUMP-USDT', 'LAB-USDT']
 COST = 0.001
+
+#: 币种板块映射 (机构实践: 组合构建时控制板块暴露)
+SECTOR = {
+    "BTC-USDT": "chain", "ETH-USDT": "chain", "SOL-USDT": "chain",
+    "XRP-USDT": "chain", "ADA-USDT": "chain", "AVAX-USDT": "chain",
+    "LTC-USDT": "chain", "DOT-USDT": "chain", "APT-USDT": "chain",
+    "ARB-USDT": "chain",
+    "BNB-USDT": "cex", "OKB-USDT": "cex",
+    "UNI-USDT": "defi", "LINK-USDT": "defi",
+    "DOGE-USDT": "meme", "TRUMP-USDT": "meme", "LAB-USDT": "meme",
+}
+#: 同板块最多入选数 (防 meme/单板块权重过度集中)
+SECTOR_CAP = 2
+
+#: 调仓缓冲: 新旧持仓重叠 ≥ 此比例则不调仓 (省换手/成本)
+BAND_KEEP_RATIO = 0.67
+
+#: 组合波动率目标 (年化): 滚动波动率高于目标自动缩仓
+VOL_TARGET = 0.25
 #: 永续合约资金费率 (OKX: 0.01%/8h 基准 = 0.03%/天; 多头付/空头收)
 FUNDING_RATE_DAY = 0.0003
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
@@ -105,6 +124,72 @@ def _row_zscore(df: pd.DataFrame) -> pd.DataFrame:
     return df.sub(mean, axis=0).div(std, axis=0)
 
 
+def _ic_ir_weights(factor_values: dict, close_df, lookback: int = 60):
+    """机构实践: 因子权重 ∝ IC_IR (滚动截面 IC 均值 / IC 标准差).
+
+    负 IC_IR 因子截断为 0 (不反向用 — 反向信号不稳定); 数据不足返回 None (用原权重).
+    """
+    rets = close_df.pct_change().shift(-1)
+    out: dict = {}
+    for fid, f in factor_values.items():
+        ff = f.reindex(close_df.index).rank(axis=1)
+        rr = rets.reindex(close_df.index).rank(axis=1)
+        ic = ff.corrwith(rr, axis=1).dropna().tail(lookback)
+        if len(ic) >= 20:
+            out[fid] = max(float(ic.mean() / (ic.std() + 1e-9)), 0.0)
+        else:
+            out[fid] = None
+    if not out or all(v is None for v in out.values()):
+        return None
+    total = sum(v for v in out.values() if v is not None)
+    if total <= 0:
+        return None
+    return {fid: (v or 0.0) / total for fid, v in out.items()}
+
+
+def _sector_cap(ranking: list[str], n: int, cap: int = SECTOR_CAP) -> list[str]:
+    """机构实践: 板块权重上限 — 从强到弱选 n 个, 同板块最多 cap 个."""
+    picked: list[str] = []
+    counts: dict[str, int] = {}
+    for sym in ranking:
+        sec = SECTOR.get(sym, "other")
+        if counts.get(sec, 0) >= cap:
+            continue
+        picked.append(sym)
+        counts[sec] = counts.get(sec, 0) + 1
+        if len(picked) >= n:
+            break
+    return picked
+
+
+def _apply_band(new_longs: list[str], new_shorts: list[str],
+                old_longs: list[str], old_shorts: list[str],
+                keep_ratio: float = BAND_KEEP_RATIO):
+    """机构实践: 调仓缓冲 — 新旧持仓重叠 ≥ 阈值则不调仓 (省换手/成本)."""
+    if not old_longs or not old_shorts:
+        return new_longs, new_shorts, False
+    n = max(1, len(new_longs))
+    keep = min(max(1, int(n * keep_ratio)), n - 1)
+    ol = len(set(new_longs) & set(old_longs))
+    os_ = len(set(new_shorts) & set(old_shorts))
+    if ol >= keep and os_ >= keep:
+        return old_longs, old_shorts, True
+    return new_longs, new_shorts, False
+
+
+def _vol_target_mult(close_df, longs: list[str], shorts: list[str],
+                     target: float = VOL_TARGET, window: int = 20) -> float:
+    """机构实践: 波动率目标 — 组合滚动波动率高于目标自动缩仓 (连续版风控)."""
+    if not longs or not shorts:
+        return 1.0
+    rets = close_df.pct_change()
+    port = rets[longs].mean(axis=1).sub(rets[shorts].mean(axis=1)).div(2)
+    vol = port.tail(window).std() * (252 ** 0.5)
+    if not math.isfinite(vol) or vol <= 1e-6:
+        return 1.0
+    return float(min(max(target / vol, 0.3), 1.5))
+
+
 def build_signal(strategy: dict) -> dict:
     """按策略的 signal_definition 生成今日多空信号 + 更新该策略模拟盘."""
     from src.strategy.variant_backtester import load_factor_module, parse_signal_definition
@@ -140,6 +225,7 @@ def build_signal(strategy: dict) -> dict:
     # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
     from src.strategy.variant_backtester import ACADEMIC_MODULES
 
+    factor_values: dict[str, pd.DataFrame] = {}
     score = None
     total_w = 0.0
     for fid in factors:
@@ -155,16 +241,44 @@ def build_signal(strategy: dict) -> dict:
         f = f.reindex(close_df.index)
         if fid not in ACADEMIC_MODULES:
             f = _row_zscore(f)
+        factor_values[fid] = f
         w = weights.get(fid, 1.0 / len(factors))
         score = f * w if score is None else score.add(f * w, fill_value=0)
         total_w += w
+    # 机构实践: IC_IR 加权 — 因子权重 ∝ 滚动 IC 稳定性 (替代静态等权)
+    ic_weights = _ic_ir_weights(factor_values, close_df)
+    if ic_weights is not None:
+        score = None
+        total_w = 0.0
+        for fid in factors:
+            f = factor_values.get(fid)
+            if f is None:
+                continue
+            w = ic_weights.get(fid, 0.0)
+            if w <= 0:
+                continue
+            score = f * w if score is None else score.add(f * w, fill_value=0)
+            total_w += w
     if score is None or total_w <= 0:
         return {'error': '无可用因子'}
     score = score / total_w
     last_date = close_df.index[-1]
     last_scores = score.iloc[-1].dropna().sort_values(ascending=False)
-    longs = last_scores.head(top_n).index.tolist()
-    shorts = last_scores.tail(bot_n).index.tolist()
+    # 机构实践: 板块权重上限 (同板块最多 SECTOR_CAP 个, 防 meme 扎堆)
+    longs = _sector_cap(last_scores.index.tolist(), top_n)
+    shorts = _sector_cap(last_scores.index.tolist()[::-1], bot_n)
+
+    # 机构实践: 调仓缓冲 — 新旧持仓重叠 ≥ 阈值则不调仓 (省换手/成本)
+    prev_state = {}
+    if os.path.exists(state_path):
+        try:
+            prev_state = json.load(open(state_path))
+        except Exception:
+            pass
+    longs, shorts, held = _apply_band(
+        longs, shorts,
+        prev_state.get('last_longs', []), prev_state.get('last_shorts', []),
+    )
 
     # 追踪组合表现: 从上一次信号日起
     state = {'started_at': None, 'nav': 1.0, 'last_signal_date': None,
@@ -182,8 +296,10 @@ def build_signal(strategy: dict) -> dict:
             event_mult = event_leverage_multiplier(last_date.date())
             # 第 2 层: regime 判定 (BTC 动量 → 全局缩仓 + 多空不对称)
             regime = get_regime(close_df, d=last_date.date())
-            long_mult = mult * event_mult * regime["long_factor"]
-            short_mult = mult * event_mult * regime["short_factor"]
+            # 机构实践: 波动率目标 — 组合滚动波动率高于目标自动缩仓 (连续风控)
+            vol_mult = _vol_target_mult(close_df, state['last_longs'], state['last_shorts'])
+            long_mult = mult * event_mult * regime["long_factor"] * vol_mult
+            short_mult = mult * event_mult * regime["short_factor"] * vol_mult
             prev_day = pd.Timestamp(state['last_signal_date']).date()
             last_day = last_date.date()
             if prev_day < last_day:
