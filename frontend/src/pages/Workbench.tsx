@@ -1332,8 +1332,12 @@ export function Workbench() {
                     <div className="font-mono text-lg font-bold mt-0.5">{autopilot.counter.count} <span className="text-xs text-muted-foreground">/ {autopilot.config.max_trades_per_day}</span></div>
                   </div>
                   <div className="rounded-lg border border-border/60 p-3">
-                    <div className="text-[11px] text-muted-foreground">监控币对</div>
-                    <div className="font-mono text-sm font-bold mt-0.5 truncate">{autopilot.config.pairs.join(", ")}</div>
+                    <div className="text-[11px] text-muted-foreground">监控币对 <span className="text-[10px]">({autopilot.config.pairs.length})</span></div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {autopilot.config.pairs.map(p => (
+                        <span key={p} className="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">{p}</span>
+                      ))}
+                    </div>
                   </div>
                   <div className="rounded-lg border border-border/60 p-3">
                     <div className="text-[11px] text-muted-foreground">风控上限</div>
