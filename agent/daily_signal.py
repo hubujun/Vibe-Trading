@@ -44,6 +44,7 @@ SIGNAL_LOGIC_VERSION = 1
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
+PANEL_TTL_S = 1800  # 17币面板磁盘缓存 TTL (30分钟, 多策略共享一次 fetch)
 
 
 def load_strategy(strategy_id: str) -> dict | None:
@@ -173,6 +174,31 @@ def _vol_target_mult(close_df, longs: list[str], shorts: list[str],
     return float(min(max(target / vol, 0.3), 1.5))
 
 
+def _load_panel_cache():
+    """30 分钟内复用同一份 17 币面板 — 29 策略共享一次 fetch (否则 cron 3 分钟跑不完)."""
+    try:
+        path = os.path.join(RUNTIME_ROOT, 'cache', 'panel_cache.pkl')
+        if os.path.exists(path) and time.time() - os.path.getmtime(path) < PANEL_TTL_S:
+            import pickle
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+            if data.get('close') is not None and len(data['close']) > 300:
+                return data['close'], data['volume']
+    except Exception:
+        pass
+    return None
+
+
+def _save_panel_cache(close_df, volume_df) -> None:
+    try:
+        os.makedirs(os.path.join(RUNTIME_ROOT, 'cache'), exist_ok=True)
+        import pickle
+        with open(os.path.join(RUNTIME_ROOT, 'cache', 'panel_cache.pkl'), 'wb') as f:
+            pickle.dump({'close': close_df, 'volume': volume_df}, f)
+    except Exception:
+        pass
+
+
 def build_signal(strategy: dict) -> dict:
     """按策略的 signal_definition 生成今日多空信号 + 更新该策略模拟盘."""
     from src.strategy.variant_backtester import load_factor_module, parse_signal_definition
@@ -190,20 +216,27 @@ def build_signal(strategy: dict) -> dict:
     )
 
     # 拉面板: close + volume (zoo 因子需要 volume, 学术因子只用 close)
-    closes, volumes = {}, {}
-    for s in SYMBOLS:
-        df = fetch_okx_daily(s)
-        if df.empty or len(df) < 300:
-            continue
-        closes[s] = df['close']
-        volumes[s] = df['volume']
-        time.sleep(0.3)
-    if len(closes) < 5:
-        return {'error': 'panel 数据不足'}
-    close_df = pd.DataFrame(closes).ffill().dropna()
-    if close_df.shape[0] < 300:
-        return {'error': 'panel 数据不足'}
-    volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
+    # 磁盘缓存 30 分钟: 多策略共享一次 fetch (combo_daily_signal.sh 遍历 29 策略,
+    # 每策略 fetch ~40s → 无缓存时 cron 3 分钟跑不完, 末尾策略永远无信号)
+    cached = _load_panel_cache()
+    if cached is not None:
+        close_df, volume_df = cached
+    else:
+        closes, volumes = {}, {}
+        for s in SYMBOLS:
+            df = fetch_okx_daily(s)
+            if df.empty or len(df) < 300:
+                continue
+            closes[s] = df['close']
+            volumes[s] = df['volume']
+            time.sleep(0.3)
+        if len(closes) < 5:
+            return {'error': 'panel 数据不足'}
+        close_df = pd.DataFrame(closes).ffill().dropna()
+        if close_df.shape[0] < 300:
+            return {'error': 'panel 数据不足'}
+        volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
+        _save_panel_cache(close_df, volume_df)
 
     # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
     # 注意: 权重必须与 backtest_variant 一致 (静态权重) — 实盘行为 = 回测行为
@@ -315,6 +348,19 @@ def build_signal(strategy: dict) -> dict:
                         'funding_net': round(net_funding * 100, 3),
                         'logic_version': SIGNAL_LOGIC_VERSION,  # 逻辑版本标记
                     })
+                    # 实验日志: 调仓记账 (append-only 审计, 失败不阻塞)
+                    try:
+                        from src.strategy.experiment_log import log_experiment
+                        log_experiment(
+                            "trade", strategy_id=strategy_id,
+                            from_=str(prev_day), to=str(last_day),
+                            ret=round(net * 100, 2),
+                            longs=list(state['last_longs']),
+                            shorts=list(state['last_shorts']),
+                            regime=regime["regime"],
+                        )
+                    except Exception:
+                        pass
         except Exception as e:
             print('  track 更新失败:', e)
 

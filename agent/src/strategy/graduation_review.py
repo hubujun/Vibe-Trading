@@ -188,6 +188,16 @@ def main() -> int:
         grade = _grade_testing(attribs)
         print(f"  累计收益 {grade['cum']:+.2f}% ({grade['n']} 笔) → {grade['grade']}")
 
+        # 实验日志: 毕业评审结果
+        try:
+            from src.strategy.experiment_log import log_experiment
+            log_experiment("graduation", strategy_id=sid, n_samples=n,
+                           cum_ret=round(grade["cum"], 3), grade=grade["grade"],
+                           ic_summary={k: v["ic_mean"] for k, v in ic_stats.items()},
+                           suggested_weights=new_w)
+        except Exception:
+            pass
+
         # 4. apply
         if args.apply and grade["grade"].startswith("validated"):
             hyps = json.loads((RUNTIME_ROOT / "hypotheses.json").read_text(encoding="utf-8"))
