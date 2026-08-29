@@ -373,19 +373,31 @@ def backtest_variant(
 # ============================================================================
 
 
+#: 回测缓存逻辑版本 — 回测逻辑变更时 +1, 缓存自动失效全量重算
+#: (v2: 动态多空比 + 板块上限 + 波动率目标, 与 daily_signal 一致)
+CACHE_LOGIC_VERSION = 2
+
+
 def load_backtest_cache() -> dict[str, dict[str, Any]]:
-    """读变体回测缓存 (fail-open)."""
+    """读变体回测缓存 (fail-open). 逻辑版本不匹配 → 返回空 (全量重算)."""
     try:
         raw = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-        return raw if isinstance(raw, dict) else {}
+        if not isinstance(raw, dict):
+            return {}
+        if raw.get("meta", {}).get("logic_version") != CACHE_LOGIC_VERSION:
+            logger.warning("variant backtest: cache logic v%d != v%d, recompute all",
+                           raw.get("meta", {}).get("logic_version"), CACHE_LOGIC_VERSION)
+            return {}
+        return {k: v for k, v in raw.items() if k != "meta"}
     except (OSError, ValueError, TypeError):
         return {}
 
 
 def save_backtest_cache(cache: dict[str, dict[str, Any]]) -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"meta": {"logic_version": CACHE_LOGIC_VERSION}, **cache}
     tmp = CACHE_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(CACHE_PATH)
 
 
@@ -627,8 +639,18 @@ def run_stress_test(cache_path: Path = CACHE_PATH,
                 if score is None:
                     continue
                 row = score.loc[d - pd.Timedelta(days=1)].dropna().sort_values(ascending=False)
-                longs = row.head(parsed["top_n"]).index.tolist()
-                shorts = row.tail(parsed["bot_n"]).index.tolist()
+                # 与 backtest_variant/daily_signal 一致的选币: 动态多空比 + 板块上限
+                mom = btc.pct_change(20).get(d - pd.Timedelta(days=1), 0.0)
+                if pd.isna(mom):
+                    tn, bn = parsed["top_n"], parsed["bot_n"]
+                elif mom >= 0.04:
+                    tn, bn = parsed["top_n"], max(1, parsed["bot_n"] - 1)
+                elif mom <= -0.04:
+                    tn, bn = max(1, parsed["top_n"] - 1), parsed["bot_n"]
+                else:
+                    tn, bn = parsed["top_n"], parsed["bot_n"]
+                longs = _sector_cap(row.index.tolist(), tn)
+                shorts = _sector_cap(row.index.tolist()[::-1], bn)
                 rets = seg.pct_change().iloc[1:]
                 rl = rets[longs].mean(axis=1).sum()
                 rs = -rets[shorts].mean(axis=1).sum()
