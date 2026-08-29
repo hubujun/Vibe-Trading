@@ -497,6 +497,9 @@ def register_workbench_routes(
                         _COMBO_RUNTIME_ROOT / "backtest_metrics.json",
                         hypotheses_path=hypotheses_path,
                         baseline=baseline,
+                        # 假设流转只归 08:30 review_daily cron — GET 每 30s 轮询
+                        # 全量流转会跨策略串扰 (用当前策略 trades 判所有假设连亏)
+                        apply_hypothesis_flow=False,
                     )
                     # 第三圈: 参数自适应 — 应用到该策略自身 (内存中, 不落盘)
                     applied = _apply_adaptations(r, [s], persist=False)
