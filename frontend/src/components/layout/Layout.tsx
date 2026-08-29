@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router";
-import { Activity, BarChart3, Bot, CalendarClock, Check, ChevronDown, FileText, Languages, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, WalletCards, Sigma, Scale, Workflow } from "lucide-react";
+import { Activity, BarChart3, Bot, CalendarClock, Check, ChevronDown, FileText, Languages, Moon, Sun, Plus, Trash2, Pencil, MessageSquare, ChevronsLeft, ChevronsRight, Settings, Layers, Loader2, WalletCards, Sigma, Scale, Stethoscope, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { api, type SessionItem } from "@/lib/api";
@@ -23,6 +23,7 @@ export function Layout() {
     { to: "/", icon: Bot, label: t('layout.agent') },
     { to: "/runtime", icon: Activity, label: t('layout.runtime') },
     { to: "/workbench", icon: Workflow, label: "策略流水线" },
+    { to: "/workbench/factors", icon: Stethoscope, label: "因子体检", indent: true },
     { to: "/scheduled", icon: CalendarClock, label: t('layout.scheduled') },
     { to: "/reports", icon: FileText, label: t('layout.reports') },
     { to: "/portfolio", icon: WalletCards, label: t('layout.portfolio') },
@@ -133,7 +134,7 @@ export function Layout() {
           aria-label={t('layout.mainNavigation', { defaultValue: 'Main navigation' })}
           className={cn("space-y-0.5", collapsed ? "p-1" : "p-2 max-md:p-1")}
         >
-          {NAV.map(({ to, icon: Icon, label }) => {
+          {NAV.map(({ to, icon: Icon, label, indent }) => {
             const text = label;
             return (
               <Link
@@ -143,13 +144,14 @@ export function Layout() {
                 className={cn(
                   "flex items-center rounded-md text-[13px] transition-colors",
                   collapsed ? "justify-center px-2 py-1.5" : "gap-3 px-3 py-1.5 max-md:justify-center max-md:px-2",
+                  indent && !collapsed && "pl-8 max-md:pl-2",
                   (to === "/" ? pathname === "/" || pathname.startsWith("/agent") : pathname.startsWith(to))
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
                 title={collapsed ? text : undefined}
               >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <Icon className={cn("h-4 w-4 shrink-0", indent && "h-3.5 w-3.5")} aria-hidden="true" />
                 {!collapsed && <span className="max-md:hidden">{text}</span>}
               </Link>
             );
