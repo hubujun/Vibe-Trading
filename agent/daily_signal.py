@@ -16,6 +16,12 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from src.strategy.macro_events import (
+    event_leverage_multiplier,
+    get_regime,
+    market_state_features,
+)
+
 SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT',
             'LTC-USDT', 'DOT-USDT', 'UNI-USDT', 'APT-USDT', 'ARB-USDT']
@@ -171,6 +177,12 @@ def build_signal(strategy: dict) -> dict:
     if state.get('last_signal_date') and state['last_longs']:
         try:
             mult = load_exposure_multiplier(strategy_id)  # 第三圈: 参数自适应
+            # 第 1 层: 事件日历降杠杆 (A/B 级事件日)
+            event_mult = event_leverage_multiplier(last_date.date())
+            # 第 2 层: regime 判定 (BTC 动量 → 全局缩仓 + 多空不对称)
+            regime = get_regime(close_df, d=last_date.date())
+            long_mult = mult * event_mult * regime["long_factor"]
+            short_mult = mult * event_mult * regime["short_factor"]
             prev_day = pd.Timestamp(state['last_signal_date']).date()
             last_day = last_date.date()
             if prev_day < last_day:
@@ -185,12 +197,17 @@ def build_signal(strategy: dict) -> dict:
                     funding_paid = len(state['last_longs']) * FUNDING_RATE_DAY * n_days
                     funding_received = len(state['last_shorts']) * FUNDING_RATE_DAY * n_days
                     net_funding = funding_received - funding_paid
-                    net = ((r_long + r_short) / 2 - COST) * mult + net_funding
+                    # 多空腿分别乘自己的乘数 (事件×regime×自适应), 成本按基准 mult
+                    net = ((r_long * long_mult + r_short * short_mult) / 2 - COST * mult) + net_funding
                     state['nav'] *= (1 + net)
                     state['trades'].append({
                         'from': str(prev_day), 'to': str(last_day),
                         'ret': round(net * 100, 2),
-                        'exposure_multiplier': mult,
+                        'exposure_multiplier': round(mult, 3),
+                        'event_multiplier': round(event_mult, 3),
+                        'regime': regime["regime"],
+                        'long_mult': round(long_mult, 3),
+                        'short_mult': round(short_mult, 3),
                         'funding_paid': round(funding_paid * 100, 3),
                         'funding_received': round(funding_received * 100, 3),
                         'funding_net': round(net_funding * 100, 3),
@@ -206,6 +223,12 @@ def build_signal(strategy: dict) -> dict:
         state['started_at'] = str(last_date.date())
     json.dump(state, open(state_path, 'w'), ensure_ascii=False, indent=2)
 
+    # 事件/regime 摘要 (无历史持仓时也有值)
+    if 'regime' not in locals():
+        regime = get_regime(close_df, d=last_date.date())
+    if 'event_mult' not in locals():
+        event_mult = event_leverage_multiplier(last_date.date())
+
     return {
         'strategy_id': strategy_id,
         'name': strategy.get('name', strategy_id),
@@ -214,6 +237,8 @@ def build_signal(strategy: dict) -> dict:
         'scores': {c: round(float(last_scores[c]), 3) for c in longs + shorts},
         'nav': state['nav'], 'started_at': state['started_at'],
         'trades': state['trades'][-3:],
+        'regime': regime["regime"],
+        'event_multiplier': event_mult,
     }
 
 

@@ -142,6 +142,8 @@ class WorkbenchResponse(BaseModel):
     autopilot_factor_stats: dict[str, Any] = Field(default_factory=dict)
     review: dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[str] = None
+    # 宏观事件/regime (第 1+2 层: 事件日历 + 市场制度)
+    macro: dict[str, Any] = Field(default_factory=dict)
 
 
 class TransitionRequest(BaseModel):
@@ -526,6 +528,18 @@ def register_workbench_routes(
             "variant_metrics": variant_metrics,
             "reviewed_at": _now_iso(),
         }
+        # 宏观事件/regime 摘要 (第 1+2 层)
+        from src.strategy.macro_events import events_on, event_leverage_multiplier
+
+        today_events = [
+            {"date": e.get("date"), "title": e.get("title", ""), "level": e.get("level", "C"), "tags": e.get("tags", [])}
+            for e in events_on()
+        ]
+        macro = {
+            "events": today_events,
+            "event_multiplier": event_leverage_multiplier(),
+            "updated_at": _now_iso(),
+        }
         return WorkbenchResponse(
             strategies=[WorkbenchStrategy(**s) for s in raw_strategies],
             combo=combo,
@@ -536,6 +550,7 @@ def register_workbench_routes(
             autopilot_factors=autopilot_factors,
             autopilot_factor_stats=autopilot_factor_stats,
             review=review_dict,
+            macro=macro,
             updated_at=_now_iso(),
         )
 
