@@ -777,9 +777,9 @@ export function Workbench() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="text-xs text-emerald-400 mb-2 flex items-center gap-1">
-                    <ArrowUpRight className="h-3.5 w-3.5" /> 做多 <span className="text-[10px] text-muted-foreground font-normal">得分最高 10 个</span>
+                    <ArrowUpRight className="h-3.5 w-3.5" /> 做多 <span className="text-[10px] text-muted-foreground font-normal">得分最高 5 个</span>
                   </div>
-                  {(paper?.scores ? Object.entries(paper.scores).sort((a, b) => b[1] - a[1]).slice(0, 10) : (paper?.longs ?? []).map(s => [s, 0]) as [string, number][]).map(([sym, sc]) => (
+                  {(paper?.scores ? Object.entries(paper.scores).sort((a, b) => b[1] - a[1]).slice(0, 5) : (paper?.longs ?? []).map(s => [s, 0]) as [string, number][]).map(([sym, sc]) => (
                     <div key={sym} className="mb-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2.5">
                       <div className="flex justify-between items-center">
                         <span className="font-mono text-sm font-semibold">{sym}</span>
