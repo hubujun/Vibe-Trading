@@ -63,6 +63,11 @@ SYMBOLS = [
     "LTC-USDT", "DOT-USDT", "UNI-USDT", "APT-USDT", "ARB-USDT",
     "TRUMP-USDT", "LAB-USDT",
 ]
+
+#: 无现货、只有永续的币 → 蜡烛用永续 instId (LAB 2025-11 上市, 无现货交易对)
+PERP_ONLY: dict[str, str] = {
+    "LAB-USDT": "LAB-USDT-SWAP",
+}
 DAYS = 800
 COST = 0.001
 PROXY = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
@@ -163,7 +168,7 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
     all_rows: list[list] = []
     after = None
     for page in range(math.ceil(DAYS / 100)):
-        params = {"instId": symbol, "bar": "1D", "limit": "100"}
+        params = {"instId": PERP_ONLY.get(symbol, symbol), "bar": "1D", "limit": "100"}
         if after:
             params["after"] = str(after)
         for attempt in range(4):
@@ -200,13 +205,15 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
 def fetch_panel() -> dict[str, pd.DataFrame] | None:
     """拉 17 币 panel (close + volume), 对齐后返回; 数据不足返回 None.
 
-    新上市币 (TRUMP/LAB 等 <800 天历史) 自动跳过, 不阻断整体.
+    新上市币 (TRUMP/LAB 等 <800 天) 有多少数据测多少天 —
+    对齐时 dropna 自动用公共区间 (最早上市的币决定窗口长度).
+    仅剔除数据过少 (<60 天) 无统计意义的币.
     """
     frames: dict[str, pd.DataFrame] = {}
     for s in SYMBOLS:
         df = fetch_okx_daily(s)
-        if df is None or len(df) < 300:
-            print(f"  [fetch_panel] {s} 数据不足, 跳过")
+        if df is None or len(df) < 60:
+            print(f"  [fetch_panel] {s} 数据过少, 跳过")
             time.sleep(0.3)
             continue
         frames[s] = df
@@ -215,8 +222,9 @@ def fetch_panel() -> dict[str, pd.DataFrame] | None:
         return None
     close = pd.DataFrame({s: f["close"] for s, f in frames.items()})
     volume = pd.DataFrame({s: f["volume"] for s, f in frames.items()})
-    close = close.dropna(axis=1, how="all").ffill().dropna()
-    volume = volume.reindex(close.index).ffill().dropna()
+    # 各币保留自己的可用长度: 新币前段保持 NaN (有多少测多少, 不拉短老币窗口)
+    close = close.dropna(axis=1, how="all").ffill()
+    volume = volume.reindex(close.index).ffill()
     if close.shape[0] < 300 or close.shape[1] < 4:
         return None
     return {"close": close, "volume": volume}
