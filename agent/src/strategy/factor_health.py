@@ -60,6 +60,17 @@ def _evaluate(fid: str, panel: dict) -> dict[str, Any] | None:
     ic_mean = float(ic.mean())
     ic_ir = float(ic.mean() / (ic.std() + 1e-9))
     ic_pos = float((ic > 0).mean())
+    # 时效性: 最近 30/60 交易日滚动 IC (因子失效预警 — 全窗口 IC 掩盖近期衰减)
+    ic_30d = float(ic.tail(30).mean()) if len(ic) >= 30 else None
+    ic_60d = float(ic.tail(60).mean()) if len(ic) >= 60 else None
+    if ic_30d is None:
+        ic_trend = "insufficient"
+    elif ic_30d < 0:
+        ic_trend = "decaying"          # 近期已失效
+    elif ic_mean > 0 and ic_30d < ic_mean * 0.5:
+        ic_trend = "weakening"         # 显著弱于历史
+    else:
+        ic_trend = "stable"
     # 多空分层收益 (信号日 t-1 选币 → t 日收益, 含 0.2% 双边成本)
     rets_d = close.pct_change()
     ls_ret: list[float] = []
@@ -85,6 +96,9 @@ def _evaluate(fid: str, panel: dict) -> dict[str, Any] | None:
         "ic": round(ic_mean, 4),
         "ic_ir": round(ic_ir, 3),
         "ic_pos": round(ic_pos, 3),
+        "ic_30d": round(ic_30d, 4) if ic_30d is not None else None,
+        "ic_60d": round(ic_60d, 4) if ic_60d is not None else None,
+        "ic_trend": ic_trend,
         "ls_annual": None if math.isnan(ls_annual) else round(ls_annual * 100, 1),
         "ls_sharpe": round(float(ls.mean() / (ls.std() + 1e-9) * math.sqrt(365)), 2),
         "days": len(ls),
