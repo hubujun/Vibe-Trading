@@ -849,6 +849,11 @@ export function Workbench() {
               )}
               <div className="mt-2 text-xs text-muted-foreground">
                 {paper?.trades?.length ?? 0} 次调仓记录 · 每日 07:00 自动更新
+                {paper?.equity_usd != null && (
+                  <span className="ml-2 font-mono text-emerald-400">
+                    模拟金额 {paper.equity_usd.toFixed(2)}U (初始 {paper.initial_funding_usd?.toFixed(0) ?? 1500}U)
+                  </span>
+                )}
               </div>
               {(() => {
                 const trades = paper?.trades ?? [];
