@@ -30,10 +30,15 @@ CACHE_PATH = Path.home() / ".vibe-trading" / "factor_health.json"
 CACHE_TTL_SECONDS = 6 * 3600
 
 #: 评估的因子清单: 学术因子 + 挖掘池主力 + 市场状态因子
+#: (只含能真实加载+compute 的因子 — 2026-08-30 排查: volume_price_corr_regime /
+#:  volume_volatility_scaled 因子文件不存在(8-23 数据恢复重建的僵尸策略, 信号实际
+#:  降级为 BAB+high52w 双因子); volume_flow_momentum / volume_close_location 依赖
+#:  panel['high'] 但全链路面板只有 close+volume → KeyError。纯版 volume_price_corr
+#:  因子文件存在、compute 正常、回测 1.27 夏普, 补入清单。)
 FACTORS = list(ACADEMIC_MODULES.keys()) + [
-    "volume_surge_reversal", "volume_flow_momentum", "volume_confirmed_momentum",
-    "volume_momentum_flow", "volume_close_location", "volume_price_corr_regime",
-    "volume_volatility_scaled", "volume_return_asymmetry", "volume_signed_pressure",
+    "volume_surge_reversal", "volume_confirmed_momentum",
+    "volume_momentum_flow", "volume_price_corr",
+    "volume_return_asymmetry", "volume_signed_pressure",
     "market_regime_momentum", "market_regime_volatility",
 ]
 
@@ -42,11 +47,13 @@ def _evaluate(fid: str, panel: dict) -> dict[str, Any] | None:
     """单因子: 滚动截面 IC / IC_IR / IC+率 / 多空分层收益 (top3-bot3 含成本)."""
     mod = load_factor_module(fid)
     if mod is None:
+        print(f"  ⚠️ factor_health: 因子 {fid} 模块加载失败, 跳过")
         return None
     close = panel["close"]
     try:
         f = mod.compute(panel).reindex(close.index)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        print(f"  ⚠️ factor_health: 因子 {fid} compute 失败: {str(exc)[:80]}")
         return None
     if fid not in ACADEMIC_MODULES:
         f = _row_zscore(f)
