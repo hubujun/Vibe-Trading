@@ -548,17 +548,25 @@ def _auto_seed_strategy(signal_definition: str, name: str) -> str | None:
 
 
 def _duplicate_factor_check(panel: dict[str, pd.DataFrame], factors: list[str],
+                            pool: list[str] | None = None,
                             corr_threshold: float = 0.9) -> str | None:
-    """机构实践: 因子相关性去重 — 新增因子与基座因子 |截面相关|>阈值 → 冗余.
+    """机构实践: 因子相关性去重 — 新增因子与基座/池内因子 |截面相关|>阈值 → 冗余.
+
+    pool: 因子池 (已存在变体用过的因子) — 全池去重: 新增因子与池内任何因子
+    高相关都判冗余, 不只查基座 (2026-08-30 共线性诊断: illiq×smb 0.95 等
+    马甲因子就是只查基座漏进来的).
 
     返回冗余因子名 (无增量 alpha, 该变体直接否决); 无冗余返回 None.
     """
     base = [f for f in factors if f in ("BAB", "high52w")]
     new = [f for f in factors if f not in ("BAB", "high52w")]
-    if not base or not new:
+    refs = base + [f for f in (pool or []) if f not in base]
+    if not refs or not new:
         return None
     vals: dict[str, pd.DataFrame] = {}
-    for fid in factors:
+    for fid in factors + refs:
+        if fid in vals:
+            continue
         mod = load_factor_module(fid)
         if mod is None:
             return None
@@ -567,8 +575,8 @@ def _duplicate_factor_check(panel: dict[str, pd.DataFrame], factors: list[str],
         except Exception:  # noqa: BLE001
             return None
     for nf in new:
-        for bf in base:
-            if nf not in vals or bf not in vals:
+        for bf in refs:
+            if nf == bf or bf not in vals or nf not in vals:
                 continue
             c = float(vals[nf].corrwith(vals[bf], axis=1).mean())
             if abs(c) > corr_threshold:
@@ -872,12 +880,23 @@ def run_variant_backtests(
     promoted: list[dict[str, Any]] = []
     dup_skipped: list[str] = []
     stab_skipped: list[str] = []
+    # 全池去重: 因子池 = 注册表所有变体用过的因子 (排除当前候选变体自身)
+    pool_factors: list[str] = []
+    for h in registry.list():
+        sd = str(h.signal_definition)
+        if not sd.startswith("combo_variant:"):
+            continue
+        p = parse_signal_definition(sd)
+        if p:
+            for f in p["factors"]:
+                if f not in pool_factors:
+                    pool_factors.append(f)
     for hyp in candidates[:max_per_run]:
         parsed = parse_signal_definition(str(hyp.signal_definition))
         if parsed is None:
             continue
-        # 机构实践: 因子相关性去重 — 新增因子与基座因子高相关 → 无增量, 直接否决
-        dup = _duplicate_factor_check(panel, parsed["factors"])
+        # 机构实践: 因子相关性去重 — 新增因子与基座/池内因子高相关 → 无增量, 直接否决
+        dup = _duplicate_factor_check(panel, parsed["factors"], pool=pool_factors)
         if dup is not None:
             dup_skipped.append(str(hyp.signal_definition))
             try:
