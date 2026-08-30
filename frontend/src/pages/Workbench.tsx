@@ -443,10 +443,19 @@ export function Workbench() {
     ],
     research: [
       // 选中策略自己的回测指标 (播种策略来自变体回测缓存, 基策略回退 COMBO2)
-      { label: <Term k="annual">回测年化</Term>, value: (strategy?.strategy_backtest?.annual ?? combo2?.annual) != null ? fmtPct(strategy?.strategy_backtest?.annual ?? combo2?.annual) : "--", color: "text-emerald-400" },
-      { label: <Term k="sharpe">回测夏普</Term>, value: (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe) != null ? (strategy?.strategy_backtest?.sharpe ?? combo2?.sharpe!).toFixed(2) : "--" },
-      { label: <Term k="maxDd">最大回撤</Term>, value: (strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) != null ? fmtPct(strategy?.strategy_backtest?.max_dd ?? combo2?.max_dd) : "--", color: "text-rose-400" },
-      { label: <Term k="cum">累计收益</Term>, value: (strategy?.strategy_backtest?.cum ?? combo2?.cum) != null ? fmtPct(strategy?.strategy_backtest?.cum ?? combo2?.cum) : "--", color: "text-emerald-400" },
+      // 2026-08-30 修复: error 标记 (僵尸/不可用策略) 显示 "--" 而不是 fallback
+      // combo2 — 之前 cum=null fallback 导致多条策略显示相同 30.13% (事故)
+      ...(() => {
+        const bt = strategy?.strategy_backtest;
+        const btErr = !!bt?.error;
+        const V = (k: string, fb?: unknown) => (btErr ? undefined : (bt?.[k as keyof typeof bt] ?? fb));
+        return [
+          { label: <Term k="annual">回测年化</Term>, value: V("annual", combo2?.annual) != null ? fmtPct(V("annual", combo2?.annual) as number) : "--", color: "text-emerald-400" },
+          { label: <Term k="sharpe">回测夏普</Term>, value: V("sharpe", combo2?.sharpe) != null ? (V("sharpe", combo2?.sharpe) as number).toFixed(2) : "--" },
+          { label: <Term k="maxDd">最大回撤</Term>, value: V("max_dd", combo2?.max_dd) != null ? fmtPct(V("max_dd", combo2?.max_dd) as number) : "--", color: "text-rose-400" },
+          { label: <Term k="cum">累计收益</Term>, value: V("cum", combo2?.cum) != null ? fmtPct(V("cum", combo2?.cum) as number) : "--", color: "text-emerald-400" },
+        ];
+      })(),
     ],
     paper: [
       { label: <Term k="nav">模拟盘净值</Term>, value: paper?.nav != null ? paper.nav.toFixed(4) : "--", color: "text-emerald-400" },

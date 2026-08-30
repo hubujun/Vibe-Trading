@@ -1908,7 +1908,7 @@ export interface WorkbenchStrategy {
   };
   review?: Partial<WorkbenchReview>;
   /** 该策略自己的回测指标 (来自变体自动回测缓存) */
-  strategy_backtest?: { annual?: number | null; sharpe?: number | null; max_dd?: number | null; cum?: number | null };
+  strategy_backtest?: { annual?: number | null; sharpe?: number | null; max_dd?: number | null; cum?: number | null; error?: string };
 }
 
 /** 因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照. */
