@@ -1,15 +1,13 @@
-"""规则引擎测试 — 老胡 5 条交易纪律 (2026-08-30 实盘就绪).
+"""规则引擎测试 — Vibe 实盘规则 (2026-08-30).
 
-覆盖: 周四五谨慎 / 宏观事件静默 / 23:00 强制平仓 / 连续 3 笔亏损当日停 /
-日内亏损熔断 / 跨日状态重置 / 状态持久化.
+2026-08-30 拍板: 移除 TradingAgents-CN 老旧纪律 (周四五/23:00 平仓).
+保留测试: 宏观事件静默 / 连续 3 笔亏损当日停 / 日内亏损熔断 / 状态持久化.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-import pytest
 
 from src.crypto_autopilot.rules_engine import (
     RuleConfig,
@@ -22,21 +20,6 @@ TZ = ZoneInfo("Asia/Shanghai")
 
 def _dt(s: str) -> datetime:
     return datetime.fromisoformat(s).replace(tzinfo=TZ)
-
-
-class TestWeekdayCautious:
-    def test_thursday_blocks_long(self) -> None:
-        v = evaluate(now=_dt("2026-09-03T10:00:00"))  # 2026-09-03 是周四
-        assert v.blocked_side == "long"
-        assert v.can_trade is True  # 只限制多头, 不禁止交易
-
-    def test_friday_blocks_long(self) -> None:
-        v = evaluate(now=_dt("2026-09-04T10:00:00"))  # 周五
-        assert v.blocked_side == "long"
-
-    def test_monday_no_block(self) -> None:
-        v = evaluate(now=_dt("2026-08-31T10:00:00"))  # 周一
-        assert v.blocked_side is None
 
 
 class TestMacroSilence:
@@ -59,21 +42,6 @@ class TestMacroSilence:
         events = [{"date": "2026-09-03", "title": "无时间事件", "level": "B"}]
         v = evaluate(now=_dt("2026-09-03T14:00:00"), events=events)
         assert v.can_trade is True  # 无 time 字段 → 不静默 (退化为杠杆乘数)
-
-
-class TestForceClose:
-    def test_at_2300_triggers(self) -> None:
-        v = evaluate(now=_dt("2026-09-03T23:00:00"))
-        assert v.action == "force_close"
-        assert v.can_trade is False
-
-    def test_after_2355_triggers(self) -> None:
-        v = evaluate(now=_dt("2026-09-03T23:59:00"))
-        assert v.action == "force_close"
-
-    def test_before_2300_no_force(self) -> None:
-        v = evaluate(now=_dt("2026-09-03T22:59:00"))
-        assert v.action is None
 
 
 class TestConsecutiveLosses:
@@ -141,11 +109,6 @@ class TestStatePersistence:
 
 
 class TestConfigOverride:
-    def test_custom_force_close_time(self) -> None:
-        cfg = RuleConfig(force_close_times=("22:00",))
-        v = evaluate(now=_dt("2026-09-03T22:05:00"), cfg=cfg)
-        assert v.action == "force_close"
-
     def test_custom_loss_threshold(self) -> None:
         cfg = RuleConfig(daily_loss_pct=2.0)
         state = RuleState(day="2026-09-03", equity_baseline=1000.0)
