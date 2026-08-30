@@ -630,11 +630,14 @@ class AutopilotOrchestrator:
         self._pending_candidates = remaining
 
     def _evaluate_trading_rules(self) -> RuleVerdict:
-        """评估老胡 5 条交易纪律 (规则引擎), 维护日初权益基线.
+        """评估 Vibe 实盘规则 (规则引擎), 维护日初权益基线.
+
+        2026-08-30 拍板: 仅保留宏观静默/连亏停/日内熔断 — TradingAgents-CN
+        老旧纪律 (周四五/23:00平仓) 已移除 (与市场中性日频体系冲突).
 
         跨日自动重置 (day 变化 → 新基线/清零连亏). equity 基线:
         live 阶段从 OKX 账户快照取; paper 阶段无权益接口 → 跳过日内熔断
-        (周四五/静默/平仓/连亏规则仍生效).
+        (静默/连亏规则仍生效).
         """
         from datetime import datetime
         from zoneinfo import ZoneInfo
@@ -711,29 +714,6 @@ class AutopilotOrchestrator:
         except Exception:  # noqa: BLE001
             logger.exception("rules: trigger_halt failed: %s", reason)
 
-    def _force_close_all(self, reason: str) -> None:
-        """强制平仓全部持仓 (paper 全平; live 尽力逐个卖出)."""
-        logger.warning("rules: 强制平仓 — %s", reason)
-        try:
-            self._paper_engine.close_all_positions()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("rules: paper close_all failed: %s", exc)
-        if self._live_executor is not None:
-            try:
-                positions = self._live_executor.read_positions_list()
-                for pos in positions or []:
-                    sym = pos.get("instId") or pos.get("symbol")
-                    if sym:
-                        self._live_executor.place_order(sym, "sell", 0.0)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("rules: live close_all failed: %s", exc)
-        self._notifier.notify(
-            "force_close",
-            "强制平仓 (规则触发)",
-            reason,
-            meta={"ts": _utc_now().isoformat()},
-        )
-
     async def _tick_trade(self) -> None:
         """Check risk, get factor signals, place orders via PaperEngine or LiveExecutor."""
         self._set_phase(PipelinePhase.PAPER_TRADING)
@@ -743,18 +723,13 @@ class AutopilotOrchestrator:
             logger.warning("tick_trade: trading halted by risk monitor")
             return
 
-        # 规则引擎: 老胡 5 条交易纪律 (2026-08-30 实盘就绪)
-        # 周四五谨慎 / 宏观事件静默 / 23:00 强制平仓 / 连亏 3 笔当日停 / 日内亏损熔断
+        # 规则引擎: Vibe 实盘规则 (2026-08-30 拍板 — 已移除 TradingAgents-CN
+        # 老旧纪律: 周四五方向限制 / 23:00 强制平仓, 与市场中性日频体系冲突)
+        # 保留: 宏观事件静默 / 连续 3 笔亏损当日停 / 日内亏损熔断
         verdict = self._evaluate_trading_rules()
         if verdict.action == "halt":
             logger.warning("tick_trade: rules triggered HALT — %s", verdict.reason)
             self._trip_halt(f"规则熔断: {verdict.reason}")
-            return
-        if verdict.action == "force_close":
-            logger.warning("tick_trade: rules force_close — %s", verdict.reason)
-            self._force_close_all(verdict.reason or "规则触发")
-            self._rule_state.force_closed = True
-            self._rule_state.save(DEFAULT_STATE_PATH)
             return
         if not verdict.can_trade:
             logger.info("tick_trade: rules blocked — %s", verdict.reason)
