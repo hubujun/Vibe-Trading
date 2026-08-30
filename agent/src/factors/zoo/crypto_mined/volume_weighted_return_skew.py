@@ -1,35 +1,34 @@
-"""Volume-weighted return skewness proxy factor."""
+"""crypto VOLUME: volume-weighted signed cubic return skew."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import delta, safe_div, signed_power, ts_mean, zscore
+from src.factors.base import decay_linear, delta, rank, safe_div, signed_power
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_weighted_return_skew",
-    "nickname": "VolumeReturnSkew",
+    "nickname": "量加权收益偏度",
     "theme": ["volume"],
-    "formula_latex": "\\text{zscore}_t\\left(\\frac{\\mathrm{MA}_{20}\\left(V \\cdot \\mathrm{sgn}(R)|R|^3\\right)}{\\mathrm{MA}_{20}(V)}\\right),\\; R_t=\\Delta C_t/C_{t-1}",
+    "formula_latex": "\\operatorname{rank}_{cs}\\left(\\frac{\\mathrm{DW}_{20}(v_t \\cdot \\mathrm{sgn}(r_t)|r_t|^3)}{\\mathrm{DW}_{20}(v_t)}\\right), \\quad r_t = \\frac{\\Delta \\mathrm{close}_t}{\\mathrm{close}_t}",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 0,
+    "decay_horizon": 20,
     "min_warmup_bars": 21,
-    "notes": "Volume-weighted third-moment proxy of returns, cross-sectionally normalized.",
+    "notes": "Volume-weighted skewness of recent returns; higher rank means large volume is associated with up moves.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return the cross-sectional z-score of volume-weighted return skewness."""
     close = panel["close"].astype(float)
-    volume = panel["volume"].astype(float)
+    volume = panel["volume"].astype(float).reindex_like(close)
 
-    returns = safe_div(delta(close, 1), close.shift(1))
-    return_shock = signed_power(returns, 3)
+    ret = safe_div(delta(close, 1), close)
+    ret3 = signed_power(ret, 3)
 
-    weighted_shock = ts_mean(volume * return_shock, 20)
-    avg_volume = ts_mean(volume, 20)
-    skew_proxy = safe_div(weighted_shock, avg_volume)
+    weighted_ret3 = decay_linear(volume * ret3, 20)
+    weighted_volume = decay_linear(volume, 20)
+    factor = safe_div(weighted_ret3, weighted_volume)
 
-    return zscore(skew_proxy)
+    return rank(factor)
