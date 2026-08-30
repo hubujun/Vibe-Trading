@@ -1898,7 +1898,9 @@ export interface WorkbenchStrategy {
   updated_at?: string | null;
   /** 运行时数据 (GET 聚合填充): 模拟盘摘要 + 复盘输出 */
   paper?: {
-    nav?: number;
+    nav?: number | null;
+    initial_funding_usd?: number;
+    equity_usd?: number;
     started_at?: string | null;
     last_signal_date?: string | null;
     longs?: string[];
