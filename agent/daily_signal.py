@@ -21,7 +21,9 @@ from src.strategy.macro_events import (
     get_regime,
     market_state_features,
 )
-from src.strategy.variant_backtester import SECTOR, SECTOR_CAP, VOL_TARGET, _sector_cap
+from src.strategy.variant_backtester import (
+    SECTOR, SECTOR_CAP, VOL_TARGET, _sector_cap, _crazy_bull_mult,
+)
 
 SYMBOLS = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'BNB-USDT', 'XRP-USDT',
             'DOGE-USDT', 'OKB-USDT', 'ADA-USDT', 'AVAX-USDT', 'LINK-USDT',
@@ -40,7 +42,8 @@ FUNDING_RATE_DAY = 0.0003
 
 #: 信号逻辑版本 — 信号/记账逻辑变更时 +1, 每笔调仓记录版本 (复盘可按版本分组)
 #: v1: 静态权重 + 动态多空比 + 板块上限 + 波动率目标 + 事件/regime (与回测一致)
-SIGNAL_LOGIC_VERSION = 1
+#: v2: + 疯牛保险普涨降仓 (与回测一致)
+SIGNAL_LOGIC_VERSION = 2
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
@@ -322,8 +325,15 @@ def build_signal(strategy: dict) -> dict:
             regime = get_regime(close_df, d=last_date.date())
             # 机构实践: 波动率目标 — 组合滚动波动率高于目标自动缩仓 (连续风控)
             vol_mult = _vol_target_mult(close_df, state['last_longs'], state['last_shorts'])
-            long_mult = mult * event_mult * regime["long_factor"] * vol_mult
-            short_mult = mult * event_mult * regime["short_factor"] * vol_mult
+            # 疯牛保险 — 普涨环境全局降仓 (与回测一致; 信号日判定, 作用于本区间)
+            crazy_mult = 1.0
+            _crazy = _crazy_bull_mult(close_df)
+            if last_date in _crazy.index:
+                v = _crazy.loc[last_date]
+                if pd.notna(v):
+                    crazy_mult = float(v)
+            long_mult = mult * event_mult * regime["long_factor"] * vol_mult * crazy_mult
+            short_mult = mult * event_mult * regime["short_factor"] * vol_mult * crazy_mult
             prev_day = pd.Timestamp(state['last_signal_date']).date()
             last_day = last_date.date()
             if prev_day < last_day:
@@ -351,6 +361,7 @@ def build_signal(strategy: dict) -> dict:
                         'regime': regime["regime"],
                         'long_mult': round(long_mult, 3),
                         'short_mult': round(short_mult, 3),
+                        'crazy_mult': round(crazy_mult, 3),
                         'funding_paid': round(funding_paid * 100, 3),
                         'funding_received': round(funding_received * 100, 3),
                         'funding_net': round(net_funding * 100, 3),
