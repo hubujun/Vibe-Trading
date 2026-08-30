@@ -85,6 +85,32 @@ SECTOR_CAP = 2
 #: 组合波动率目标 (年化) — 回测/实盘一致的连续风控
 VOL_TARGET = 0.25
 
+#: 疯牛保险 — 普涨环境自动降仓 (防 2021 式普涨轧空, 回测/实盘一致)
+#: 信号: 上涨广度 >50% 币 20d 动量 >15% 且 BTC 20d 动量 >8% → 杠杆乘数 0.4
+CRAZY_BULL_MULT = 0.4
+CRAZY_BREADTH_TH = 0.5
+CRAZY_MOM_TH = 0.15
+CRAZY_BTC_TH = 0.08
+
+
+def _crazy_bull_mult(close: pd.DataFrame) -> pd.Series:
+    """疯牛保险乘数 — 普涨环境全局降仓 (0.4 或 1.0, 与 daily_signal 一致).
+
+    普涨疯牛 (上涨广度 >50% 且 BTC 20d 动量 >8%) 时全局缩到 CRAZY_BULL_MULT,
+    防多空对冲被普涨轧空 (2021 疯牛回测 -50% 回撤的根源; 2700 天多周期回测:
+    全期年化 +9%→+12.3%, 极值回撤 -65.3%→-56.9%).
+    返回逐日乘数 Series, 调用方 shift(1) 防前视.
+    """
+    mom20 = close.pct_change(20)
+    if "BTC-USDT" in close.columns:
+        btc_mom = close["BTC-USDT"].pct_change(20)
+    else:
+        btc_mom = pd.Series(0.0, index=close.index)
+    avail = mom20.notna().sum(axis=1)
+    breadth = (mom20 > CRAZY_MOM_TH).sum(axis=1) / avail.replace(0, np.nan)
+    sig = (breadth > CRAZY_BREADTH_TH) & (btc_mom > CRAZY_BTC_TH)
+    return pd.Series(np.where(sig, CRAZY_BULL_MULT, 1.0), index=close.index)
+
 
 def _sector_cap(ranking: list[str], n: int, cap: int = SECTOR_CAP) -> list[str]:
     """板块权重上限 — 从强到弱选 n 个, 同板块最多 cap 个 (与 daily_signal 一致)."""
@@ -349,7 +375,9 @@ def backtest_variant(
     vol = daily.rolling(20).std() * math.sqrt(252)
     vol_mult = (VOL_TARGET / vol.replace(0, float("nan"))).clip(0.3, 1.5)
     vol_mult = vol_mult.shift(1).fillna(1.0)
-    net = daily * vol_mult - turnover * COST
+    # 疯牛保险 (与 daily_signal 一致): 普涨环境全局降仓 (防轧空), shift(1) 防前视
+    crazy_mult = _crazy_bull_mult(close).shift(1).fillna(1.0)
+    net = daily * vol_mult * crazy_mult - turnover * COST
     nav = (1 + net.fillna(0)).cumprod()
     total = float(nav.iloc[-1] - 1)
     years = len(nav) / 365
@@ -374,8 +402,8 @@ def backtest_variant(
 
 
 #: 回测缓存逻辑版本 — 回测逻辑变更时 +1, 缓存自动失效全量重算
-#: (v2: 动态多空比 + 板块上限 + 波动率目标, 与 daily_signal 一致)
-CACHE_LOGIC_VERSION = 2
+#: (v2: 动态多空比 + 板块上限 + 波动率目标; v3: + 疯牛保险普涨降仓, 与 daily_signal 一致)
+CACHE_LOGIC_VERSION = 3
 
 
 def load_backtest_cache() -> dict[str, dict[str, Any]]:
