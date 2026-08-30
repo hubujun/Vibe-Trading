@@ -29,18 +29,30 @@ from src.strategy.variant_backtester import (
 CACHE_PATH = Path.home() / ".vibe-trading" / "factor_health.json"
 CACHE_TTL_SECONDS = 6 * 3600
 
-#: 评估的因子清单: 学术因子 + 挖掘池主力 + 市场状态因子
+#: 挖掘池 zoo 根目录 (crypto_mined 因子文件所在)
+_ZOO_ROOT = Path(__file__).resolve().parent.parent / "factors" / "zoo" / "crypto_mined"
+
+
+def _list_mined_factors() -> list[str]:
+    """扫描挖掘池 zoo: 全部因子文件 stem (排除 _ 前缀与 __pycache__).
+
+    动态扫描而非硬编码清单 — 因子挖掘器持续产出新因子, 硬编码会漏掉。
+    僵尸因子 (文件缺失/依赖列缺失 compute 失败) 由 _evaluate 自然跳过。
+    """
+    if not _ZOO_ROOT.is_dir():
+        return []
+    return sorted(
+        p.stem for p in _ZOO_ROOT.glob("*.py") if not p.name.startswith("_")
+    )
+
+
+#: 评估的因子清单: 学术因子 + 挖掘池 zoo 全量 + 市场状态因子
 #: (只含能真实加载+compute 的因子 — 2026-08-30 排查: volume_price_corr_regime /
 #:  volume_volatility_scaled 因子文件不存在(8-23 数据恢复重建的僵尸策略, 信号实际
 #:  降级为 BAB+high52w 双因子); volume_flow_momentum / volume_close_location 依赖
 #:  panel['high'] 但全链路面板只有 close+volume → KeyError。纯版 volume_price_corr
 #:  因子文件存在、compute 正常、回测 1.27 夏普, 补入清单。)
-FACTORS = list(ACADEMIC_MODULES.keys()) + [
-    "volume_surge_reversal", "volume_confirmed_momentum",
-    "volume_momentum_flow", "volume_price_corr",
-    "volume_return_asymmetry", "volume_signed_pressure",
-    "market_regime_momentum", "market_regime_volatility",
-]
+FACTORS = list(ACADEMIC_MODULES.keys()) + _list_mined_factors()
 
 
 def _evaluate(fid: str, panel: dict) -> dict[str, Any] | None:
