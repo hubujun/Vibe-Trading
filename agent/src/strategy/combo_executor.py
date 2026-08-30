@@ -98,16 +98,21 @@ def fetch_current_positions() -> dict[str, dict]:
 
 
 def build_orders(target_longs: list[str], target_shorts: list[str],
-                 current: dict[str, dict], per_leg: float) -> list[dict]:
+                 current: dict[str, dict], per_leg_long: float,
+                 per_leg_short: float | None = None) -> list[dict]:
     """目标持仓 vs 当前持仓 → 订单列表 (开/平).
 
     规则: 目标有而实际无 → 开仓; 实际有而目标无 → 平仓; 都有 → 不动.
+    开仓名义: 多头腿 = per_leg_long, 空头腿 = per_leg_short (默认同 per_leg_long) —
+    风控乘数 (事件/regime/波动率目标/疯牛保险) 已随 build_signal 的 long_mult/short_mult 缩放.
     返回订单: {symbol(永续), side(buy/sell), notional, action(open/close), target(long/short)}
     """
     orders: list[dict] = []
+    per_leg_short = per_leg_short if per_leg_short is not None else per_leg_long
     target_insts = {_perp_inst(s) for s in target_longs} | {_perp_inst(s) for s in target_shorts}
     target_side = {_perp_inst(s): "long" for s in target_longs}
     target_side.update({_perp_inst(s): "short" for s in target_shorts})
+    per_leg_by_side = {"long": per_leg_long, "short": per_leg_short}
 
     for inst in sorted(target_insts):
         want = target_side[inst]
@@ -116,7 +121,7 @@ def build_orders(target_longs: list[str], target_shorts: list[str],
             # 开仓
             side = "buy" if want == "long" else "sell"
             orders.append({
-                "symbol": inst, "side": side, "notional": per_leg,
+                "symbol": inst, "side": side, "notional": per_leg_by_side[want],
                 "action": "open", "target": want,
             })
         # 已有持仓且方向一致 → 不动 (等权固定, 不调权重)
@@ -127,7 +132,7 @@ def build_orders(target_longs: list[str], target_shorts: list[str],
             side = "sell" if cur["side"] == "long" else "buy"
             orders.append({
                 "symbol": inst, "side": side,
-                "notional": cur["notional"] or per_leg,
+                "notional": cur["notional"] or per_leg_long,
                 "action": "close", "target": "flat",
             })
     return orders
@@ -229,15 +234,22 @@ def main() -> int:
         append_ledger([{"event": "blocked", "reason": reason, "ts": _now_iso()}])
         return 0
 
-    # 3. 当前持仓 + 订单
+    # 3. 当前持仓 + 订单 (敞口随风控乘数缩放: 事件/regime/波动率目标/疯牛保险)
     current = fetch_current_positions()
     per_leg = allocation_per_leg()
-    orders = build_orders(longs, shorts, current, per_leg)
+    long_mult = float(sig.get("long_mult", 1.0))
+    short_mult = float(sig.get("short_mult", 1.0))
+    orders = build_orders(
+        longs, shorts, current,
+        per_leg_long=per_leg * long_mult,
+        per_leg_short=per_leg * short_mult,
+    )
     if not orders:
         print("持仓已对齐, 无调仓")
         return 0
 
-    print(f"\n每腿名义: {per_leg:.0f}U | 订单 {len(orders)} 笔:")
+    print(f"\n每腿名义: 多 {per_leg * long_mult:.0f}U / 空 {per_leg * short_mult:.0f}U "
+          f"(基准 {per_leg:.0f}U × long/short_mult {long_mult:.2f}/{short_mult:.2f})")
     for o in orders:
         print(f"  [{o['action']}] {o['symbol']:<20} {o['side']:<5} {o['notional']:.0f}U")
 

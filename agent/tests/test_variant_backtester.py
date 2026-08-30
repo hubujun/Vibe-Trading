@@ -315,3 +315,37 @@ class TestDupPoolCheck:
         # newf 与 BAB/high52w (BaseMod=close) 相关 1.0 → 无 pool 时仍被拦 (基座查重)
         dup = vb._duplicate_factor_check(panel, ["BAB", "high52w", "newf"])
         assert dup == "newf"
+
+
+def test_parse_signal_definition_with_short_filter() -> None:
+    """超跌补涨过滤参数解析: short_dd_th/short_mom_th (缺省为 None)."""
+    sd = "combo_variant: weights={BAB:0.5,high52w:0.5} top_n=3 bot_n=3 short_dd_th=-0.60 short_mom_th=0.10"
+    p = parse_signal_definition(sd)
+    assert p is not None
+    assert p["short_dd_th"] == -0.60
+    assert p["short_mom_th"] == 0.10
+    # 旧定义无过滤参数 → None (向后兼容)
+    p2 = parse_signal_definition("combo_variant: weights={BAB:0.5,high52w:0.5} top_n=3 bot_n=3")
+    assert p2 is not None
+    assert p2["short_dd_th"] is None
+    assert p2["short_mom_th"] is None
+
+
+def test_backtest_with_short_filter_runs() -> None:
+    """带超跌补涨过滤参数跑回测不报错, 返回标准指标结构."""
+    panel = _synthetic_panel()
+    m = backtest_variant(
+        panel, ["BAB", "high52w"], {"BAB": 0.5, "high52w": 0.5}, 3, 3,
+        short_dd_th=-0.60, short_mom_th=0.10,
+    )
+    assert "error" not in m
+    for k in ("annual", "sharpe", "max_dd", "cum", "days"):
+        assert k in m
+
+
+def test_backtest_without_filter_back_compat() -> None:
+    """不传过滤参数 → 与旧版行为一致 (不报错, 指标结构相同)."""
+    panel = _synthetic_panel()
+    m = backtest_variant(panel, ["BAB", "high52w"], {"BAB": 0.5, "high52w": 0.5}, 3, 3)
+    assert "error" not in m
+    assert "annual" in m
