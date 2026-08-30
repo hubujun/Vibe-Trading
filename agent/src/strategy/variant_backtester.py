@@ -456,6 +456,7 @@ def _load_base_metrics(cache: dict[str, dict[str, Any]], panel: dict[str, pd.Dat
         "annual": m["annual"],
         "sharpe": m["sharpe"],
         "max_dd": m["max_dd"],
+        "cum": m.get("cum"),  # 累计收益 — 2026-08-30 补: 前端研究卡基策略 cum
         "universe_size": len(SYMBOLS),
         "backtested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
