@@ -16,6 +16,7 @@ surface layer (``POST /live/halt``).
 
 from __future__ import annotations
 
+import json
 import logging
 import sys as _sys
 from pathlib import Path
@@ -474,8 +475,27 @@ def load_performance_for_dashboard() -> dict[str, Any] | None:
         return None
 
 
+def _factor_health_index() -> dict[str, dict[str, Any]]:
+    """读因子体检缓存, 建 短因子名 → 指标 索引 (ic/ic_ir/ic_pos/ic_trend/分层收益).
+
+    挖掘层/学术层共用同一套 IC 口径 (factor_health 全窗口截面 rank IC)。
+    缓存缺失/损坏时返回空 dict — 前端对缺指标因子显示 "--", 不阻塞页面。
+    """
+    try:
+        raw = json.loads(
+            (Path.home() / ".vibe-trading" / "factor_health.json").read_text(encoding="utf-8")
+        )
+        return {str(r.get("factor", "")): r for r in raw.get("results", []) if r.get("factor")}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
 def load_factors_for_dashboard() -> dict[str, Any] | None:
-    """Read active/pending/retired factors plus zoo counts (best-effort)."""
+    """Read active/pending/retired factors plus zoo counts (best-effort).
+
+    zoo/active 条目附加 ``health`` 字段 (因子体检的 IC/IR/IC+ 率/趋势),
+    供工作台挖掘层与学术层同口径展示 IC 信息含量。
+    """
     import json
 
     from src.crypto_autopilot.factor_store import FactorStore
@@ -489,18 +509,45 @@ def load_factors_for_dashboard() -> dict[str, Any] | None:
         except (OSError, ValueError, TypeError):
             pass
         zoo = FactorStore().list_factors_with_meta()
+        health_index = _factor_health_index()
+
+        zoo_list: list[dict[str, Any]] = []
+        for f in zoo:
+            item = {
+                "alpha_id": str(f.get("alpha_id", "")),
+                "nickname": (f.get("meta") or {}).get("nickname") or "",
+                "theme": (f.get("meta") or {}).get("theme") or [],
+            }
+            h = health_index.get(item["alpha_id"])
+            if h:
+                item["health"] = {
+                    "ic": h.get("ic"),
+                    "ic_ir": h.get("ic_ir"),
+                    "ic_pos": h.get("ic_pos"),
+                    "ic_trend": h.get("ic_trend"),
+                    "ls_annual": h.get("ls_annual"),
+                    "ls_sharpe": h.get("ls_sharpe"),
+                }
+            zoo_list.append(item)
+
+        active_list: list[dict[str, Any]] = []
+        for a in payload.get("active", []):
+            item = dict(a)
+            h = health_index.get(str(item.get("alpha_id", "")).replace("crypto_mined_", ""))
+            if h:
+                item["health"] = {
+                    "ic": h.get("ic"),
+                    "ic_ir": h.get("ic_ir"),
+                    "ic_pos": h.get("ic_pos"),
+                    "ic_trend": h.get("ic_trend"),
+                }
+            active_list.append(item)
+
         return {
-            "active": payload.get("active", []),
+            "active": active_list,
             "pending": [str(x) for x in payload.get("pending", [])],
             "retired": payload.get("retired", []),
-            "zoo": [
-                {
-                    "alpha_id": str(f.get("alpha_id", "")),
-                    "nickname": (f.get("meta") or {}).get("nickname") or "",
-                    "theme": (f.get("meta") or {}).get("theme") or [],
-                }
-                for f in zoo
-            ],
+            "zoo": zoo_list,
             "zoo_count": len(zoo),
             "updated_at": payload.get("updated_at"),
         }
