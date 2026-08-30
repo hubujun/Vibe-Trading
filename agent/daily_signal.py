@@ -43,7 +43,7 @@ FUNDING_RATE_DAY = 0.0003
 #: 信号逻辑版本 — 信号/记账逻辑变更时 +1, 每笔调仓记录版本 (复盘可按版本分组)
 #: v1: 静态权重 + 动态多空比 + 板块上限 + 波动率目标 + 事件/regime (与回测一致)
 #: v2: + 疯牛保险普涨降仓 (与回测一致)
-SIGNAL_LOGIC_VERSION = 2
+SIGNAL_LOGIC_VERSION = 3
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
@@ -186,26 +186,33 @@ def _vol_target_mult(close_df, longs: list[str], shorts: list[str],
 
 
 def _load_panel_cache():
-    """30 分钟内复用同一份 17 币面板 — 29 策略共享一次 fetch (否则 cron 3 分钟跑不完)."""
+    """30 分钟内复用同一份 17 币面板 — 29 策略共享一次 fetch (否则 cron 3 分钟跑不完).
+
+    v2 缓存格式: {'close', 'volume', 'high', 'low', 'cache_v': 2} —
+    旧缓存 (只有 close/volume) 自动失效重拉.
+    """
     try:
         path = os.path.join(RUNTIME_ROOT, 'cache', 'panel_cache.pkl')
         if os.path.exists(path) and time.time() - os.path.getmtime(path) < PANEL_TTL_S:
             import pickle
             with open(path, 'rb') as f:
                 data = pickle.load(f)
-            if data.get('close') is not None and len(data['close']) > 300:
-                return data['close'], data['volume']
+            if data.get('cache_v') == 2 and data.get('close') is not None and len(data['close']) > 300:
+                return data['close'], data['volume'], data.get('high'), data.get('low')
     except Exception:
         pass
     return None
 
 
-def _save_panel_cache(close_df, volume_df) -> None:
+def _save_panel_cache(close_df, volume_df, high_df, low_df) -> None:
     try:
         os.makedirs(os.path.join(RUNTIME_ROOT, 'cache'), exist_ok=True)
         import pickle
         with open(os.path.join(RUNTIME_ROOT, 'cache', 'panel_cache.pkl'), 'wb') as f:
-            pickle.dump({'close': close_df, 'volume': volume_df}, f)
+            pickle.dump({
+                'close': close_df, 'volume': volume_df,
+                'high': high_df, 'low': low_df, 'cache_v': 2,
+            }, f)
     except Exception:
         pass
 
@@ -231,15 +238,17 @@ def build_signal(strategy: dict) -> dict:
     # 每策略 fetch ~40s → 无缓存时 cron 3 分钟跑不完, 末尾策略永远无信号)
     cached = _load_panel_cache()
     if cached is not None:
-        close_df, volume_df = cached
+        close_df, volume_df, high_df, low_df = cached
     else:
-        closes, volumes = {}, {}
+        closes, volumes, highs, lows = {}, {}, {}, {}
         for s in SYMBOLS:
             df = fetch_okx_daily(s)
             if df.empty or len(df) < 300:
                 continue
             closes[s] = df['close']
             volumes[s] = df['volume']
+            highs[s] = df['high']
+            lows[s] = df['low']
             time.sleep(0.3)
         if len(closes) < 5:
             return {'error': 'panel 数据不足'}
@@ -247,7 +256,9 @@ def build_signal(strategy: dict) -> dict:
         if close_df.shape[0] < 300:
             return {'error': 'panel 数据不足'}
         volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
-        _save_panel_cache(close_df, volume_df)
+        high_df = pd.DataFrame(highs).reindex(close_df.index).ffill()
+        low_df = pd.DataFrame(lows).reindex(close_df.index).ffill()
+        _save_panel_cache(close_df, volume_df, high_df, low_df)
 
     # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
     # 注意: 权重必须与 backtest_variant 一致 (静态权重) — 实盘行为 = 回测行为
@@ -262,7 +273,7 @@ def build_signal(strategy: dict) -> dict:
             print(f'  警告: 因子 {fid} 模块缺失, 跳过')
             continue
         try:
-            f = mod.compute({'close': close_df, 'volume': volume_df})
+            f = mod.compute({'close': close_df, 'volume': volume_df, 'high': high_df, 'low': low_df})
         except Exception as e:
             print(f'  警告: 因子 {fid} compute 失败: {str(e)[:60]}')
             continue
