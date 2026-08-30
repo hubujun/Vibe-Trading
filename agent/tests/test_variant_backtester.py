@@ -215,3 +215,61 @@ class TestRunPipeline:
         # 幂等: 重复播种返回 None, 不新增
         assert vb._auto_seed_strategy(sd, "again") is None
         assert len(json.loads(strategies_path.read_text(encoding="utf-8"))["strategies"]) == 1
+
+
+class TestSplitICCheck:
+    """分时段稳定性闸门: 挖掘因子前/后半段 IC 符号一致才放行 (2026-08-30)."""
+
+    def _fake_module(self, panel, flip=False):
+        """假因子模块: 前半段 = close (rank 与收益一致), 后半段 ±close 控制 IC 符号."""
+        close = panel["close"]
+
+        class FakeMod:
+            def compute(self, p):
+                out = close.copy()
+                n = len(out)
+                split = n // 2
+                if flip:
+                    out.iloc[split:] = -close.iloc[split:].values
+                return out
+
+        return FakeMod()
+
+    def test_stable_factor_passes(self, monkeypatch) -> None:
+        from src.strategy import variant_backtester as vb
+
+        panel = _synthetic_panel()
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: self._fake_module(panel))
+        fail, f, b = vb._factor_split_ic_check(panel, ["BAB", "high52w", "stablef"])
+        assert fail is None, f"稳定因子不应被拦截: {fail} ({f} / {b})"
+
+    def test_flip_factor_rejected(self, monkeypatch) -> None:
+        from src.strategy import variant_backtester as vb
+
+        panel = _synthetic_panel()
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: self._fake_module(panel, flip=True))
+        fail, f, b = vb._factor_split_ic_check(panel, ["BAB", "high52w", "flipf"])
+        assert fail == "flipf", f"时变因子应被拦截 (front={f} back={b})"
+        assert f is not None and b is not None
+        assert (f >= 0) != (b >= 0), "前后半段 IC 符号应相反"
+
+    def test_compute_failure_rejected(self, monkeypatch) -> None:
+        from src.strategy import variant_backtester as vb
+
+        class BoomMod:
+            def compute(self, p):
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: BoomMod())
+        panel = _synthetic_panel()
+        fail, f, b = vb._factor_split_ic_check(panel, ["BAB", "high52w", "boomf"])
+        assert fail == "boomf", "compute 失败的因子应判不可用拦截"
+
+    def test_academic_factor_not_checked(self, monkeypatch) -> None:
+        """学术因子不参与稳定性检查 (经典已验证, 闸门只针对挖掘因子)."""
+        from src.strategy import variant_backtester as vb
+
+        panel = _synthetic_panel()
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: None)
+        fail, f, b = vb._factor_split_ic_check(panel, ["BAB", "high52w", "RMW"])
+        assert fail is None
