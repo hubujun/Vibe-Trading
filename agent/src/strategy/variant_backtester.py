@@ -576,6 +576,50 @@ def _duplicate_factor_check(panel: dict[str, pd.DataFrame], factors: list[str],
     return None
 
 
+def _factor_split_ic_check(panel: dict[str, pd.DataFrame], factors: list[str],
+                           min_days: int = 60) -> tuple[str | None, float | None, float | None]:
+    """分时段稳定性闸门 (2026-08-30, 防时变因子/过拟合) — 挖掘因子的前/后半段 IC 符号必须一致.
+
+    动机: 单次全窗口回测会把'前半段有效后半段失效'的时变因子当成好因子,
+    这类因子实盘大概率是噪声. 对变体的每个新增挖掘因子 (非学术基座):
+    - 前 50% / 后 50% 历史分别算截面 rank IC 均值
+    - 符号相反且 |差| > 0.01 (排除纯噪声 ±0.001) → 判不稳定, 变体否决
+    - 模块加载失败 / compute 异常 → 判不可用 (与僵尸因子同源问题, 直接拦下)
+
+    返回 (fail_factor, ic_front, ic_back); 通过返回 (None, ic_front, ic_back).
+    """
+    close = panel["close"]
+    rets = close.pct_change().shift(-1)
+    n = len(close)
+    if n < min_days * 2 + 10:
+        return None, None, None
+    split = n // 2
+    for fid in factors:
+        if fid in ACADEMIC_MODULES:
+            continue
+        mod = load_factor_module(fid)
+        if mod is None:
+            return fid, None, None
+        try:
+            f = mod.compute(panel).reindex(close.index)
+            f = _row_zscore(f)
+        except Exception:  # noqa: BLE001
+            return fid, None, None
+        ics: list[float | None] = []
+        for lo, hi in ((0, split), (split, n)):
+            fr = f.iloc[lo:hi].rank(axis=1)
+            rr = rets.iloc[lo:hi].rank(axis=1)
+            ic = fr.corrwith(rr, axis=1).dropna()
+            ic = ic[ic.abs() < 1]
+            ics.append(float(ic.mean()) if len(ic) >= min_days else None)
+        front, back = ics
+        if front is None or back is None:
+            continue
+        if (front >= 0) != (back >= 0) and abs(front - back) > 0.01:
+            return fid, round(front, 4), round(back, 4)
+    return None, None, None
+
+
 STRESS_SCENARIOS = ("crash", "liquidity", "flash", "macro", "all")
 
 
@@ -827,6 +871,7 @@ def run_variant_backtests(
     backtested: list[dict[str, Any]] = []
     promoted: list[dict[str, Any]] = []
     dup_skipped: list[str] = []
+    stab_skipped: list[str] = []
     for hyp in candidates[:max_per_run]:
         parsed = parse_signal_definition(str(hyp.signal_definition))
         if parsed is None:
@@ -846,6 +891,26 @@ def run_variant_backtests(
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("variant backtest: dup reject failed for %s", hyp.hypothesis_id)
+            continue
+        # 分时段稳定性闸门: 挖掘因子前/后半段 IC 符号必须一致 (防时变因子/过拟合)
+        stab, ic_f, ic_b = _factor_split_ic_check(panel, parsed["factors"])
+        if stab is not None:
+            stab_skipped.append(str(hyp.signal_definition))
+            try:
+                if ic_f is None or ic_b is None:
+                    reason = f"{stab} 因子不可用 (模块缺失或 compute 失败)"
+                else:
+                    reason = f"{stab} 分时段 IC 符号反转 (前 {ic_f} / 后 {ic_b}), 时变不稳定"
+                registry.update(
+                    hyp.hypothesis_id,
+                    status="rejected",
+                    invalidation_notes=(
+                        f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                        f"分时段稳定性 — {reason}"
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning("variant backtest: stab reject failed for %s", hyp.hypothesis_id)
             continue
         metrics = backtest_variant(
             panel,
@@ -911,7 +976,8 @@ def run_variant_backtests(
     except Exception:  # noqa: BLE001 — 日志失败绝不阻塞回测
         pass
     return {"backtested": backtested, "promoted": promoted, "rejudged": rejudged,
-            "dup_skipped": dup_skipped, "skipped": max(0, len(candidates) - max_per_run)}
+            "dup_skipped": dup_skipped, "stab_skipped": stab_skipped,
+            "skipped": max(0, len(candidates) - max_per_run)}
 
 
 def _read_cache(path: Path) -> dict[str, dict[str, Any]]:
