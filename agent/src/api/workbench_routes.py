@@ -492,8 +492,13 @@ def register_workbench_routes(
                 sd = s.get("signal_definition") or ""
                 if sd in backtest_cache:
                     m = backtest_cache[sd]
-                    baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
-                    s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
+                    if m.get("error"):
+                        # 缓存条目自身标记不可用 (如 backfill 类脚本误写) — 保留
+                        # strategies.json 原值 (error 标记), 不覆盖 — 2026-08-30 事故防御
+                        pass
+                    else:
+                        baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
+                        s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
                 elif s.get("strategy_id") == "combo_bab_52w" and "_BASE_" in backtest_cache:
                     # 仅基策略: 用当前 universe 动态基准 (variant_backtester 产出)
                     m = backtest_cache["_BASE_"]
