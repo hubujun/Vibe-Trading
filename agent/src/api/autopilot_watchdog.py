@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from src.crypto_autopilot.health import HealthMonitor
@@ -48,6 +49,10 @@ _DOWN_KIND = "autopilot_down"
 
 #: Event kind emitted when the loop comes back (matches notifier templates).
 _RECOVERED_KIND = "crash_recovered"
+
+#: 报警冷却: down/recovered 各自 30 分钟内不重复发 — 代理抖动 1 分钟恢复时,
+#: 避免 down+recovered 成对轰炸 (通知噪音, 不是故障).
+_COOLDOWN_S = 1800
 
 
 def _runtime_root() -> Path:
@@ -85,6 +90,8 @@ class AutopilotWatchdog:
         self._stale_after_s: int = max(10, stale_after_s)
         self._was_alive: bool | None = None
         self._task: asyncio.Task | None = None
+        self._last_down_at: float = 0.0
+        self._last_recovered_at: float = 0.0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -136,23 +143,32 @@ class AutopilotWatchdog:
             self._was_alive = alive
             logger.debug("autopilot watchdog initial state: alive=%s", alive)
             return
+        now = time.monotonic()
         if alive and not self._was_alive:
-            self._notifier.notify(
-                _RECOVERED_KIND,
-                "Autopilot recovered",
-                "Autopilot heartbeat is fresh again after going stale.",
-                meta={"stale_after_s": self._stale_after_s},
-            )
-            logger.info("autopilot watchdog: autopilot recovered")
+            if now - self._last_recovered_at >= _COOLDOWN_S:
+                self._notifier.notify(
+                    _RECOVERED_KIND,
+                    "Autopilot recovered",
+                    "Autopilot heartbeat is fresh again after going stale.",
+                    meta={"stale_after_s": self._stale_after_s},
+                )
+                self._last_recovered_at = now
+                logger.info("autopilot watchdog: autopilot recovered")
+            else:
+                logger.info("autopilot watchdog: recovered (cooldown, 不重复通知)")
         elif not alive and self._was_alive:
-            self._notifier.notify(
-                _DOWN_KIND,
-                "Autopilot offline",
-                "Autopilot heartbeat is stale — the loop is down or hung. "
-                "launchd should be restarting it.",
-                meta={"stale_after_s": self._stale_after_s},
-            )
-            logger.warning("autopilot watchdog: autopilot heartbeat stale")
+            if now - self._last_down_at >= _COOLDOWN_S:
+                self._notifier.notify(
+                    _DOWN_KIND,
+                    "Autopilot offline",
+                    "Autopilot heartbeat is stale — the loop is down or hung. "
+                    "launchd should be restarting it.",
+                    meta={"stale_after_s": self._stale_after_s},
+                )
+                self._last_down_at = now
+                logger.warning("autopilot watchdog: autopilot heartbeat stale")
+            else:
+                logger.info("autopilot watchdog: down (cooldown, 不重复通知)")
         self._was_alive = alive
 
 
