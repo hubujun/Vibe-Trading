@@ -268,3 +268,131 @@ class TestDeleteStrategy:
         body = client2.get("/api/workbench").json()
 
         assert body["strategies"][0]["phase"] == "paper"
+
+
+class TestWorkbenchDataConsistency:
+    """2026-08-30 数据事故回归: 研究卡指标重复/被覆盖的自动化防线.
+
+    事故链: ①回填把降级指标写入缓存 (多条策略相同 33.03/1.08)
+    ②GET 聚合 fallback _BASE_ 覆盖 error 标记 ③批量持久化把覆盖值落盘.
+    """
+
+    BASE_SD = "combo_variant: weights={BAB:0.5,high52w:0.5} top_n=3 bot_n=3"
+    VAR_SD = ("combo_variant: factors=[BAB,high52w,vol_x] "
+              "weights={BAB:0.33,high52w:0.33,vol_x:0.33} top_n=3 bot_n=3")
+    GHOST_SD = ("combo_variant: factors=[BAB,high52w,ghostf] "
+                "weights={BAB:0.33,high52w:0.33,ghostf:0.33} top_n=3 bot_n=3")
+
+    def _seed(self, tmp_path: Path, monkeypatch, strategies: list[dict], cache: dict) -> None:
+        (tmp_path / "workbench").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "workbench" / "strategies.json").write_text(
+            json.dumps({"strategies": strategies}), encoding="utf-8"
+        )
+        # load_backtest_cache 读 variant_backtester.CACHE_PATH — 模块 import 时固化,
+        # 必须显式 monkeypatch (全量跑时可能已被其他测试文件 import, Path.home 无效)
+        from src.strategy import variant_backtester as vb
+
+        combo_dir = tmp_path / ".vibe-trading" / "runs" / "paper_combo"
+        combo_dir.mkdir(parents=True, exist_ok=True)
+        (combo_dir / "variant_backtests.json").write_text(
+            json.dumps({"meta": {"logic_version": 2}, **cache}), encoding="utf-8"
+        )
+        monkeypatch.setattr(vb, "CACHE_PATH", combo_dir / "variant_backtests.json")
+        _write_combo_state(tmp_path, {"nav": 1.0, "trades": []})
+
+    def _base_strategy(self) -> dict:
+        return {
+            "strategy_id": "combo_bab_52w", "name": "基策略",
+            "factors": ["BAB", "high52w"], "signal_definition": self.BASE_SD,
+            "run_dir": str(Path.home() / "runs" / "paper_combo"), "phase": "paper",
+            "strategy_backtest": {},
+        }
+
+    def _variant_strategy(self) -> dict:
+        return {
+            "strategy_id": "combo_var_x", "name": "变体", "factors": ["BAB", "high52w", "vol_x"],
+            "signal_definition": self.VAR_SD,
+            "run_dir": str(Path.home() / "runs" / "paper_combo"), "phase": "paper",
+            "strategy_backtest": {},
+        }
+
+    def _ghost_strategy(self) -> dict:
+        return {
+            "strategy_id": "combo_ghost1", "name": "僵尸", "factors": ["BAB", "high52w", "ghostf"],
+            "signal_definition": self.GHOST_SD,
+            "run_dir": str(Path.home() / "runs" / "paper_combo"), "phase": "paused",
+            "strategy_backtest": {
+                "annual": None, "sharpe": None, "max_dd": None, "cum": None,
+                "error": "因子不可用 (测试)",
+            },
+        }
+
+    def test_base_strategy_uses_base_cum(self, tmp_path: Path, monkeypatch) -> None:
+        """基策略 strategy_backtest 用 _BASE_ (含 cum), 不 fallback 旧基准."""
+        client = _client(tmp_path, monkeypatch)
+        self._seed(tmp_path, monkeypatch, [self._base_strategy()],
+                   {"_BASE_": {"annual": 37.44, "sharpe": 1.19, "max_dd": -26.38, "cum": 100.79}})
+        r = client.get("/api/workbench")
+        assert r.status_code == 200
+        s = r.json()["strategies"][0]
+        assert s["strategy_backtest"]["cum"] == 100.79
+        assert s["strategy_backtest"]["annual"] == 37.44
+
+    def test_error_strategy_not_overwritten(self, tmp_path: Path, monkeypatch) -> None:
+        """僵尸策略 (error 标记, sd 不在缓存) → GET 后 error 保留, 不被 _BASE_ 覆盖."""
+        client = _client(tmp_path, monkeypatch)
+        self._seed(tmp_path, monkeypatch, [self._ghost_strategy()],
+                   {"_BASE_": {"annual": 37.44, "sharpe": 1.19, "max_dd": -26.38, "cum": 100.79}})
+        r = client.get("/api/workbench")
+        assert r.status_code == 200
+        s = r.json()["strategies"][0]
+        assert s["strategy_backtest"]["error"] == "因子不可用 (测试)"
+        assert s["strategy_backtest"]["annual"] is None
+        # 持久化也不被覆盖
+        persisted = _read_persisted(tmp_path)
+        assert persisted[0]["strategy_backtest"]["error"] == "因子不可用 (测试)"
+
+    def test_error_cache_entry_keeps_stored(self, tmp_path: Path, monkeypatch) -> None:
+        """缓存有僵尸 sd 条目且带 error → 保留 strategies.json 原值 (防御 backfill 误写)."""
+        client = _client(tmp_path, monkeypatch)
+        self._seed(tmp_path, monkeypatch, [self._ghost_strategy()],
+                   {self.GHOST_SD: {"error": "不可用", "annual": 33.03, "sharpe": 1.08},
+                    "_BASE_": {"annual": 37.44, "sharpe": 1.19, "max_dd": -26.38, "cum": 100.79}})
+        r = client.get("/api/workbench")
+        assert r.status_code == 200
+        s = r.json()["strategies"][0]
+        assert s["strategy_backtest"]["error"] == "因子不可用 (测试)"
+        assert s["strategy_backtest"]["annual"] is None, "缓存降级条目不得覆盖 error 标记"
+
+    def test_no_duplicate_quadruples(self, tmp_path: Path, monkeypatch) -> None:
+        """混合策略 GET 后: 非 error 策略的 (annual/sharpe/max_dd/cum) 四元组无重复."""
+        client = _client(tmp_path, monkeypatch)
+        self._seed(tmp_path, monkeypatch, [self._base_strategy(), self._variant_strategy(), self._ghost_strategy()],
+                   {self.VAR_SD: {"annual": 48.26, "sharpe": 1.48, "max_dd": -20.39, "cum": 137.06},
+                    "_BASE_": {"annual": 37.44, "sharpe": 1.19, "max_dd": -26.38, "cum": 100.79}})
+        r = client.get("/api/workbench")
+        assert r.status_code == 200
+        quads = []
+        for s in r.json()["strategies"]:
+            sb = s["strategy_backtest"]
+            if not sb.get("error") and sb.get("annual") is not None:
+                quads.append((sb["annual"], sb["sharpe"], sb["max_dd"], sb["cum"]))
+        assert len(quads) == 2, f"应只有基策略+变体有指标: {quads}"
+        assert len(set(quads)) == 2, f"四元组不得重复: {quads}"
+
+    def test_base_metrics_include_cum(self, tmp_path: Path, monkeypatch) -> None:
+        """_load_base_metrics 生成的 _BASE_ 含 cum 字段 (前端基策略累计收益数据源)."""
+        import pandas as pd
+
+        from src.strategy import variant_backtester as vb
+
+        monkeypatch.setattr(
+            vb, "backtest_variant",
+            lambda *a, **k: {"annual": 37.44, "sharpe": 1.19, "max_dd": -26.38, "cum": 100.79},
+        )
+        panel = {"close": pd.DataFrame(
+            columns=[f"S{i}" for i in range(17)],
+            index=pd.date_range("2025-01-01", periods=10))}
+        base, changed = vb._load_base_metrics({}, panel)
+        assert changed is True
+        assert base["cum"] == 100.79, "_BASE_ 必须含 cum"
