@@ -277,7 +277,7 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
 
 
 def fetch_panel() -> dict[str, pd.DataFrame] | None:
-    """拉 17 币 panel (close + volume), 对齐后返回; 数据不足返回 None.
+    """拉 17 币 panel (close + volume + high + low), 对齐后返回; 数据不足返回 None.
 
     新上市币 (TRUMP/LAB 等 <800 天) 有多少数据测多少天 —
     对齐时 dropna 自动用公共区间 (最早上市的币决定窗口长度).
@@ -296,12 +296,16 @@ def fetch_panel() -> dict[str, pd.DataFrame] | None:
         return None
     close = pd.DataFrame({s: f["close"] for s, f in frames.items()})
     volume = pd.DataFrame({s: f["volume"] for s, f in frames.items()})
+    high = pd.DataFrame({s: f["high"] for s, f in frames.items()})
+    low = pd.DataFrame({s: f["low"] for s, f in frames.items()})
     # 各币保留自己的可用长度: 新币前段保持 NaN (有多少测多少, 不拉短老币窗口)
     close = close.dropna(axis=1, how="all").ffill()
     volume = volume.reindex(close.index).ffill()
+    high = high.reindex(close.index).ffill()
+    low = low.reindex(close.index).ffill()
     if close.shape[0] < 300 or close.shape[1] < 4:
         return None
-    return {"close": close, "volume": volume}
+    return {"close": close, "volume": volume, "high": high, "low": low}
 
 
 # ============================================================================
@@ -437,7 +441,7 @@ def backtest_variant(
 
 #: 回测缓存逻辑版本 — 回测逻辑变更时 +1, 缓存自动失效全量重算
 #: (v2: 动态多空比 + 板块上限 + 波动率目标; v3: + 疯牛保险普涨降仓, 与 daily_signal 一致)
-CACHE_LOGIC_VERSION = 3
+CACHE_LOGIC_VERSION = 4
 
 
 def load_backtest_cache() -> dict[str, dict[str, Any]]:
