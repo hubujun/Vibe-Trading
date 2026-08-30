@@ -154,7 +154,11 @@ ACADEMIC_MODULES: dict[str, str] = {
 def parse_signal_definition(sig_def: str) -> dict[str, Any] | None:
     """解析 ``combo_variant: factors=[...] weights={...} top_n=3 bot_n=3``.
 
-    返回 {factors, weights, top_n, bot_n}; 无法解析返回 None.
+    可选超跌补涨过滤 (空头腿, 防慢牛轧空):
+      short_dd_th=-0.60 short_mom_th=0.10 — 排除 距52周高点回撤<short_dd_th 且
+      20d 动量>short_mom_th 的币 (超跌且正在补涨 → 不空).
+    返回 {factors, weights, top_n, bot_n, short_dd_th, short_mom_th};
+    无法解析返回 None.
     """
     if not sig_def or not sig_def.startswith("combo_variant:"):
         return None
@@ -184,9 +188,22 @@ def parse_signal_definition(sig_def: str) -> dict[str, Any] | None:
     if m_b:
         bot_n = int(m_b.group(1))
 
+    # 超跌补涨过滤参数 (可选; 无 → None = 不过滤, 兼容旧定义)
+    short_dd_th = None
+    m_dd = re.search(r"short_dd_th=([-0-9.]+)", body)
+    if m_dd:
+        short_dd_th = float(m_dd.group(1))
+    short_mom_th = None
+    m_mom = re.search(r"short_mom_th=([-0-9.]+)", body)
+    if m_mom:
+        short_mom_th = float(m_mom.group(1))
+
     if not factors or not weights:
         return None
-    return {"factors": factors, "weights": weights, "top_n": top_n, "bot_n": bot_n}
+    return {
+        "factors": factors, "weights": weights, "top_n": top_n, "bot_n": bot_n,
+        "short_dd_th": short_dd_th, "short_mom_th": short_mom_th,
+    }
 
 
 # ============================================================================
@@ -307,12 +324,16 @@ def backtest_variant(
     top_n: int,
     bot_n: int,
     dynamic_n: bool = True,
+    short_dd_th: float | None = None,
+    short_mom_th: float | None = None,
 ) -> dict[str, Any]:
     """对单个变体跑回测, 返回指标 dict.
 
     dynamic_n=True: 温和版动态多空比 — 按日 BTC 20d 动量调整:
       牛市 (≥+4%): 3 多 + 2 空 (减空头腿); 熊市 (≤-4%): 2 多 + 3 空 (减多头腿);
       震荡: 3 + 3 对称. 用行级 mask 实现 (每日期限不同).
+    short_dd_th/short_mom_th: 超跌补涨过滤 — 空头候选排除 距52周高点回撤
+      <short_dd_th 且 20d 动量 >short_mom_th 的币 (慢牛补涨轧空防护).
     """
     close = panel["close"]
     rets = close.pct_change()
@@ -349,6 +370,9 @@ def backtest_variant(
         btc_mom = close["BTC-USDT"].pct_change(20)
     else:
         btc_mom = pd.Series(0.0, index=close.index)
+    # 超跌补涨过滤特征 (空头腿): 距52周高点回撤 + 20d 动量
+    _dd52 = close / close.rolling(252).max() - 1
+    _mom20 = close.pct_change(20)
     w = pd.DataFrame(0.0, index=close.index, columns=close.columns)
     for dt in close.index:
         row = combo.loc[dt].dropna().sort_values(ascending=False)
@@ -364,7 +388,17 @@ def backtest_variant(
         else:
             tn, bn = top_n, bot_n
         longs = _sector_cap(row.index.tolist(), tn)
-        shorts = _sector_cap(row.index.tolist()[::-1], bn)
+        short_cands = row.index.tolist()[::-1]
+        if short_dd_th is not None and short_mom_th is not None:
+            # 超跌补涨过滤: 排除 距高点回撤<阈值 且 20d动量>阈值 的币 (防慢牛轧空)
+            short_cands = [
+                c for c in short_cands
+                if not (_dd52.loc[dt, c] < short_dd_th and _mom20.loc[dt, c] > short_mom_th)
+            ]
+        if not short_cands:
+            continue
+        bn_eff = min(bn, len(short_cands))
+        shorts = _sector_cap(short_cands, bn_eff)
         w.loc[dt, longs] = 1.0
         w.loc[dt, shorts] = -1.0
     w = w.div(w.abs().sum(axis=1), axis=0)
@@ -742,6 +776,9 @@ def run_stress_test(cache_path: Path = CACHE_PATH,
         return {"error": "panel fetch failed", "windows": [], "results": []}
     close = panel["close"]
     btc = close["BTC-USDT"] if "BTC-USDT" in close.columns else close.mean(axis=1)
+    # 超跌补涨过滤特征 (与 backtest_variant 一致)
+    _dd52 = close / close.rolling(252).max() - 1
+    _mom20 = close.pct_change(20)
     windows = _find_stress_windows(scenario, panel)
     if not windows:
         return {"windows": [], "results": [], "note": f"数据范围内无 {scenario} 场景窗口"}
@@ -797,7 +834,19 @@ def run_stress_test(cache_path: Path = CACHE_PATH,
                 else:
                     tn, bn = parsed["top_n"], parsed["bot_n"]
                 longs = _sector_cap(row.index.tolist(), tn)
-                shorts = _sector_cap(row.index.tolist()[::-1], bn)
+                short_cands = row.index.tolist()[::-1]
+                sd_th = parsed.get("short_dd_th")
+                sm_th = parsed.get("short_mom_th")
+                if sd_th is not None and sm_th is not None:
+                    # 超跌补涨过滤 (与 backtest_variant 一致): 排除超跌且正在补涨的币
+                    short_cands = [
+                        c for c in short_cands
+                        if not (_dd52.loc[d - pd.Timedelta(days=1), c] < sd_th
+                                and _mom20.loc[d - pd.Timedelta(days=1), c] > sm_th)
+                    ]
+                if not short_cands:
+                    continue
+                shorts = _sector_cap(short_cands, min(bn, len(short_cands)))
                 rets = seg.pct_change().iloc[1:]
                 rl = rets[longs].mean(axis=1).sum()
                 rs = -rets[shorts].mean(axis=1).sum()
@@ -966,6 +1015,8 @@ def run_variant_backtests(
             parsed["weights"],
             parsed["top_n"],
             parsed["bot_n"],
+            short_dd_th=parsed.get("short_dd_th"),
+            short_mom_th=parsed.get("short_mom_th"),
         )
         if "error" in metrics:
             continue

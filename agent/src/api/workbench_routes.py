@@ -579,6 +579,21 @@ def register_workbench_routes(
             "event_multiplier": event_leverage_multiplier(),
             "updated_at": _now_iso(),
         }
+        # 今日信号乘数链摘要 (daily_signal 07:00 落盘, 轻量读 — 疯牛保险/regime/波动率目标状态)
+        try:
+            _last_sig = json.loads(
+                (Path(_STRATEGIES_PATH).parent / "last_signal.json").read_text(encoding="utf-8")
+            )
+            macro.update({
+                "crazy_mult": float(_last_sig.get("crazy_mult", 1.0)),
+                "long_mult": float(_last_sig.get("long_mult", 1.0)),
+                "short_mult": float(_last_sig.get("short_mult", 1.0)),
+                "vol_mult": float(_last_sig.get("vol_mult", 1.0)),
+                "signal_regime": _last_sig.get("regime"),
+                "signal_date": _last_sig.get("date"),
+            })
+        except Exception:
+            pass
         return WorkbenchResponse(
             strategies=[WorkbenchStrategy(**s) for s in raw_strategies],
             combo=combo,
