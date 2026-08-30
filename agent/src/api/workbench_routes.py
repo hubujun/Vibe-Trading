@@ -494,13 +494,14 @@ def register_workbench_routes(
                     m = backtest_cache[sd]
                     baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
                     s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
-                elif "_BASE_" in backtest_cache:
-                    # 基策略自身: 用当前 universe 动态基准 (variant_backtester 产出)
+                elif s.get("strategy_id") == "combo_bab_52w" and "_BASE_" in backtest_cache:
+                    # 仅基策略: 用当前 universe 动态基准 (variant_backtester 产出)
                     m = backtest_cache["_BASE_"]
                     baseline = {"annual": m.get("annual"), "max_dd": m.get("max_dd")}
                     s["strategy_backtest"] = {k: m.get(k) for k in ("annual", "sharpe", "max_dd", "cum")}
-                else:
-                    s["strategy_backtest"] = {}
+                # else: sd 不在缓存 → 保留 strategies.json 原值 (僵尸/不可用策略的
+                # error 标记), 不覆盖 — 2026-08-30 事故: fallback _BASE_ 覆盖 +
+                # 第 540 行批量持久化把覆盖值落盘, 9 条策略研究详情完全相同
                 try:
                     r = compute_review(
                         run_dir / "state.json",
