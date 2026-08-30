@@ -1966,6 +1966,13 @@ export interface WorkbenchResponse {
     events: Array<{ date?: string; title: string; level?: string; tags?: string[] }>;
     event_multiplier: number;
     updated_at?: string | null;
+    /** 今日信号乘数链摘要 (daily_signal 落盘): 疯牛保险/regime/波动率目标状态 */
+    crazy_mult?: number;
+    long_mult?: number;
+    short_mult?: number;
+    vol_mult?: number;
+    signal_regime?: string;
+    signal_date?: string;
   };
 }
 

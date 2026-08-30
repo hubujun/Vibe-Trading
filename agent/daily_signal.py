@@ -288,7 +288,23 @@ def build_signal(strategy: dict) -> dict:
         top_n_eff, bot_n_eff = top_n, bot_n
     # 机构实践: 板块权重上限 (同板块最多 SECTOR_CAP 个, 防 meme 扎堆)
     longs = _sector_cap(last_scores.index.tolist(), top_n_eff)
-    shorts = _sector_cap(last_scores.index.tolist()[::-1], bot_n_eff)
+    short_cands = last_scores.index.tolist()[::-1]
+    # 超跌补涨过滤 (与回测 backtest_variant 一致): 排除 距52周高点回撤<阈值 且
+    # 20d 动量>阈值 的币 (慢牛补涨轧空防护; 变体 signal_definition 可配置)
+    sd_th = spec.get('short_dd_th')
+    sm_th = spec.get('short_mom_th')
+    if sd_th is not None and sm_th is not None:
+        _dd52 = close_df / close_df.rolling(252).max() - 1
+        _mom20 = close_df.pct_change(20)
+        short_cands = [
+            c for c in short_cands
+            if not (_dd52.loc[last_date, c] < sd_th and _mom20.loc[last_date, c] > sm_th)
+        ]
+    if short_cands:
+        shorts = _sector_cap(short_cands, min(bot_n_eff, len(short_cands)))
+    else:
+        # 兜底: 全部候选被过滤 (极端行情) → 用原始候选, 不空仓
+        shorts = _sector_cap(last_scores.index.tolist()[::-1], bot_n_eff)
 
     # 机构实践: 调仓缓冲 — 新旧持仓重叠 ≥ 阈值则不调仓 (省换手/成本)
     prev_state = {}
@@ -406,11 +422,43 @@ def build_signal(strategy: dict) -> dict:
             pass
     json.dump(state, open(state_path, 'w'), ensure_ascii=False, indent=2)
 
-    # 事件/regime 摘要 (无历史持仓时也有值)
-    if 'regime' not in locals():
-        regime = get_regime(close_df, d=last_date.date())
-    if 'event_mult' not in locals():
-        event_mult = event_leverage_multiplier(last_date.date())
+    # 事件/regime 摘要 (无条件计算, 无历史持仓时也有值)
+    regime = get_regime(close_df, d=last_date.date())
+    event_mult = event_leverage_multiplier(last_date.date())
+    # 执行层敞口乘数 (信号日, 目标持仓口径; 与记账/回测乘数链同源)
+    # 供 combo_executor 每腿名义缩放 + UI 展示: mult × event × regime × vol × crazy
+    try:
+        _mult = load_exposure_multiplier(strategy_id)
+        _vol = _vol_target_mult(close_df, longs, shorts)
+        _crazy = 1.0
+        _cs = _crazy_bull_mult(close_df)
+        if last_date in _cs.index and pd.notna(_cs.loc[last_date]):
+            _crazy = float(_cs.loc[last_date])
+        sig_long_mult = _mult * event_mult * regime["long_factor"] * _vol * _crazy
+        sig_short_mult = _mult * event_mult * regime["short_factor"] * _vol * _crazy
+    except Exception:
+        sig_long_mult = sig_short_mult = 1.0
+        _vol = 1.0
+        _crazy = 1.0
+
+    # 今日信号摘要落盘 (轻量, workbench GET 每 30s 轮询读 — 供 UI 展示疯牛保险/乘数链)
+    try:
+        _last_sig = {
+            'strategy_id': strategy_id,
+            'date': str(last_date.date()),
+            'regime': regime["regime"],
+            'event_multiplier': round(event_mult, 3),
+            'long_mult': round(sig_long_mult, 3),
+            'short_mult': round(sig_short_mult, 3),
+            'crazy_mult': round(_crazy, 3),
+            'vol_mult': round(_vol, 3),
+            'updated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+        }
+        _sig_path = os.path.join(WORKBENCH_PATH.rsplit('/', 1)[0], 'last_signal.json')
+        with open(_sig_path, 'w', encoding='utf-8') as f:
+            json.dump(_last_sig, f, ensure_ascii=False)
+    except Exception:
+        pass
 
     return {
         'strategy_id': strategy_id,
@@ -422,6 +470,10 @@ def build_signal(strategy: dict) -> dict:
         'trades': state['trades'][-3:],
         'regime': regime["regime"],
         'event_multiplier': event_mult,
+        'long_mult': round(sig_long_mult, 3),
+        'short_mult': round(sig_short_mult, 3),
+        'crazy_mult': round(_crazy, 3),
+        'vol_mult': round(_vol, 3),
     }
 
 

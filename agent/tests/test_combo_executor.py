@@ -37,7 +37,7 @@ class TestBuildOrders:
             target_longs=["BTC-USDT", "OKB-USDT"],
             target_shorts=["LAB-USDT"],
             current={},
-            per_leg=250.0,
+            per_leg_long=250.0,
         )
         assert len(orders) == 3
         by_sym = {o["symbol"]: o for o in orders}
@@ -53,7 +53,7 @@ class TestBuildOrders:
         }
         orders = build_orders(
             target_longs=["BTC-USDT"], target_shorts=[],
-            current=current, per_leg=250.0,
+            current=current, per_leg_long=250.0,
         )
         closes = [o for o in orders if o["action"] == "close"]
         assert len(closes) == 1
@@ -67,7 +67,7 @@ class TestBuildOrders:
         }
         orders = build_orders(
             target_longs=["BTC-USDT"], target_shorts=[],
-            current=current, per_leg=250.0,
+            current=current, per_leg_long=250.0,
         )
         assert orders == []  # 已持有且方向一致 → 不动
 
@@ -78,10 +78,29 @@ class TestBuildOrders:
         }
         orders = build_orders(
             target_longs=[], target_shorts=["ETH-USDT"],
-            current=current, per_leg=250.0,
+            current=current, per_leg_long=250.0,
         )
         closes = [o for o in orders if o["action"] == "close"]
         opens = [o for o in orders if o["action"] == "open"]
         assert len(closes) == 1 and closes[0]["symbol"] == "BTC-USDT-SWAP"
         assert len(opens) == 1 and opens[0]["symbol"] == "ETH-USDT-SWAP"
         assert opens[0]["side"] == "sell"  # 新空头
+
+    def test_scaled_legs_by_side(self) -> None:
+        """风控乘数缩放: 多头腿与空头腿名义不同 (long/short_mult)."""
+        orders = build_orders(
+            target_longs=["BTC-USDT"], target_shorts=["LAB-USDT"],
+            current={},
+            per_leg_long=250.0, per_leg_short=125.0,
+        )
+        by_sym = {o["symbol"]: o for o in orders}
+        assert by_sym["BTC-USDT-SWAP"]["notional"] == 250.0   # 多头腿
+        assert by_sym["LAB-USDT-SWAP"]["notional"] == 125.0   # 空头腿(regime/风控打折)
+
+    def test_per_leg_short_defaults_to_long(self) -> None:
+        """未传 per_leg_short → 与 long 相同 (向后兼容)."""
+        orders = build_orders(
+            target_longs=["BTC-USDT"], target_shorts=["LAB-USDT"],
+            current={}, per_leg_long=200.0,
+        )
+        assert all(o["notional"] == 200.0 for o in orders)

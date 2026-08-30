@@ -165,6 +165,7 @@ const TERMS: Record<string, string> = {
   factorTiers: "因子分层：学术(文献因子) → 挖掘(factor miner 自动挖) → 组合(变体拼装)。下层供上层，每层有自己的 IC 表和状态标注",
   autopilotStatus: "执行层状态（Autopilot）：策略信号的实际执行引擎。当前 paper_trading = 纸面模拟执行，未接真实交易所",
   lifecycleLog: "流水线生命周期记录：策略在流水线里的阶段变更履历（挖掘→组合→研究→模拟→执行→复盘 每次迁移都有记录），可追溯它怎么一步步走到今天",
+  crazyBull: "疯牛保险：当全场普涨（>50% 币 20 天涨超 15% 且 BTC 也在涨）时，市场分化小、空头容易被轧，系统自动把杠杆降到 ×0.4 避险。普涨退潮后自动恢复满杠杆。2021 疯牛回测 -50% 回撤就是靠它砍到 -35%",
   execDetail: "执行明细（纸面账户）：纸面账户的交易统计（胜率/PnL/夏普/回撤）+ 当前持仓。样本少时数字仅供参考",
   reviewAdvice: "复盘建议（Loop 反馈）：复盘引擎给策略的体检报告和建议（下一圈去组合迭代还是回研究回炉），每日 08:30 更新",
   hypothesisReg: "候选组合：所有因子假设（学术/挖掘）与变体组合的状态档案。exploring→testing→validated 是晋升路径，rejected 是被否决的。每次回测跑赢基策略的组合自动晋升并播种进模拟盘",
@@ -646,6 +647,19 @@ export function Workbench() {
                   </span>
                 ) : (
                   <span className="text-muted-foreground/70">无重大事件 · 满杠杆运行</span>
+                )}
+              </span>
+              {/* 疯牛保险: 普涨环境自动降仓 (第 4 层风控, 与回测一致) */}
+              <span className="flex items-center gap-1.5 border-l border-border/60 pl-4">
+                <span className={cn("rounded px-1.5 py-0.5 font-semibold", (data?.macro?.crazy_mult ?? 1) < 1 ? "bg-rose-500/20 text-rose-400" : "bg-muted text-muted-foreground")}>
+                  疯牛保险
+                </span>
+                {(data?.macro?.crazy_mult ?? 1) < 1 ? (
+                  <span className="flex items-center gap-1 text-rose-400">
+                    普涨降仓 → 杠杆 ×{data?.macro?.crazy_mult} <Term k="crazyBull" />
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground/70">未触发</span>
                 )}
               </span>
               <span className="flex items-center gap-1">
