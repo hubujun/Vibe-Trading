@@ -346,7 +346,11 @@ class AutopilotOrchestrator:
         self._set_phase(PipelinePhase.COLLECTING)
         logger.debug("tick_collect: fetching bars for %s", self.config.pairs)
 
-        bars = self._feed.fetch_panel(
+        # fetch_panel 是同步串行网络请求 (17 币逐个拉, SSL 抖动时单个可卡
+        # 1-3 分钟) — 直接调用会阻塞事件循环 → 心跳 task 卡死 → watchdog
+        # 误报 down。挪到线程池, 心跳保持新鲜。
+        bars = await asyncio.to_thread(
+            self._feed.fetch_panel,
             pairs=self.config.pairs,
             period=self.config.bar_period,
             limit=self.config.bar_limit,
@@ -459,7 +463,8 @@ class AutopilotOrchestrator:
             logger.info("tick_mine: no panel available; skipping")
             return
 
-        candidates = self._factor_miner.mine_factors(
+        candidates = await asyncio.to_thread(
+            self._factor_miner.mine_factors,
             panel=self._panel,
             n_candidates=3,
             theme_hints=self._mining_hints or None,
@@ -556,7 +561,11 @@ class AutopilotOrchestrator:
         remaining: list[FactorCandidate] = []
         for candidate in self._pending_candidates:
             try:
-                report = self._backtester.run_backtest_for_factor(candidate, panel)
+                # 回测是同步 subprocess(最长 300s), 直接调用会阻塞事件循环
+                # → 心跳 task 卡死 → watchdog 误报 down。挪到线程池执行。
+                report = await asyncio.to_thread(
+                    self._backtester.run_backtest_for_factor, candidate, panel,
+                )
                 passes, reason, details = self._overfit_gate.evaluate(candidate, report)
 
                 if passes:
@@ -829,7 +838,7 @@ class AutopilotOrchestrator:
                         # Phase 3: out-of-sample recheck on the long history
                         # window before promoting — a paper run can look good
                         # while the factor overfits the paper period.
-                        oos_ok, oos_details = self._promotion_oos_recheck(
+                        oos_ok, oos_details = await self._promotion_oos_recheck(
                             factor_info,
                         )
                         if not oos_ok:
@@ -1074,7 +1083,7 @@ class AutopilotOrchestrator:
             result["regime"] = self._regime_snapshot
 
         try:
-            analysis = self._feedback.analyze(factor_results)
+            analysis = await asyncio.to_thread(self._feedback.analyze, factor_results)
             if analysis:
                 # Update mining hints for next cycle.
                 hints = self._feedback.get_mining_hints()
@@ -1362,7 +1371,7 @@ class AutopilotOrchestrator:
                 )
         return weights
 
-    def _promotion_oos_recheck(self, factor_info: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+    async def _promotion_oos_recheck(self, factor_info: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         """Re-run the overfit gate on the long history window pre-promotion.
 
         The promotion gate only sees the paper period; this recheck reruns
@@ -1392,7 +1401,9 @@ class AutopilotOrchestrator:
                     candidate.alpha_id,
                 )
                 return True, {"skipped": "history unavailable"}
-            report = self._backtester.run_backtest_for_factor(candidate, panel)
+            report = await asyncio.to_thread(
+                self._backtester.run_backtest_for_factor, candidate, panel,
+            )
             if report.status != "ok":
                 return False, {
                     "reason": "OOS backtest failed: "

@@ -212,6 +212,10 @@ class DataLoader:
 
         codes = [c.replace("/", "-").upper() for c in codes]
 
+        # LAB 无现货只有永续: OKX history-candles?instId=LAB-USDT 报 51001,
+        # 必须映射到 LAB-USDT-SWAP (与 variant_backtester.PERP_ONLY 同步)。
+        PERP_ONLY = {"LAB-USDT": "LAB-USDT-SWAP"}
+
         start_ts = int(pd.Timestamp(start_date).timestamp() * 1000)
         end_ts = int((pd.Timestamp(end_date) + pd.Timedelta(days=1)).timestamp() * 1000)
 
@@ -232,6 +236,7 @@ class DataLoader:
         result: Dict[str, pd.DataFrame] = {}
         for symbol in codes:
             try:
+                inst_id = PERP_ONLY.get(symbol, symbol)
                 df = cached_loader_fetch(
                     source=self.name,
                     symbol=symbol,
@@ -239,9 +244,9 @@ class DataLoader:
                     start_date=start_date,
                     end_date=end_date,
                     fields=None,
-                    fetch=lambda symbol=symbol, use_history=use_history: self._fetch_candles(
+                    fetch=lambda symbol=symbol, inst_id=inst_id, use_history=use_history: self._fetch_candles(
                         session,
-                        symbol,
+                        inst_id,
                         start_ts,
                         end_ts,
                         interval,
