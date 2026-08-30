@@ -48,11 +48,19 @@ PANEL_TTL_S = 1800  # 17币面板磁盘缓存 TTL (30分钟, 多策略共享一�
 
 
 def load_strategy(strategy_id: str) -> dict | None:
-    """从工作台读取策略配置 (含 signal_definition / run_dir)."""
+    """从工作台读取策略配置 (含 signal_definition / run_dir).
+
+    已暂停 (phase == paused) 的策略返回 None — 任何调用路径都不再生成信号/记账
+    (2026-08-30: 僵尸策略 combo_0e1012c1/combo_093cb7d1 因子模块缺失,
+     信号静默降级为双因子, 暂停后须彻底停止记账).
+    """
     try:
         raw = json.load(open(WORKBENCH_PATH))
         for s in raw.get('strategies', []):
             if s.get('strategy_id') == strategy_id:
+                if s.get('phase') == 'paused':
+                    print(f"  跳过: 策略 {strategy_id} 已暂停 (phase=paused)")
+                    return None
                 return s
     except Exception:
         pass
