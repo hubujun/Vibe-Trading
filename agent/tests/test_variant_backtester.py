@@ -273,3 +273,45 @@ class TestSplitICCheck:
         monkeypatch.setattr(vb, "load_factor_module", lambda fid: None)
         fail, f, b = vb._factor_split_ic_check(panel, ["BAB", "high52w", "RMW"])
         assert fail is None
+
+
+class TestDupPoolCheck:
+    """全池去重: 新增因子与池内任意因子高相关 → 冗余 (2026-08-30)."""
+
+    def _dup_modules(self, panel):
+        """BAB/high52w 正常, poolf/newf 返回完全相同序列 (相关=1.0)."""
+        close = panel["close"]
+
+        class BaseMod:
+            def compute(self, p):
+                return close
+
+        class DupeMod:
+            def compute(self, p):
+                return close * 2.0  # 线性变换, rank 相关 = 1.0
+
+        return {
+            "BAB": BaseMod(), "high52w": BaseMod(),
+            "poolf": DupeMod(), "newf": DupeMod(),
+        }
+
+    def test_new_vs_pool_redundant(self, monkeypatch) -> None:
+        from src.strategy import variant_backtester as vb
+
+        panel = _synthetic_panel()
+        mods = self._dup_modules(panel)
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: mods.get(fid))
+        # newf 与池内 poolf 相关 1.0 → 判冗余
+        dup = vb._duplicate_factor_check(panel, ["BAB", "high52w", "newf"], pool=["poolf"])
+        assert dup == "newf", "新增因子与池内因子高相关应判冗余"
+
+    def test_no_pool_keeps_base_only(self, monkeypatch) -> None:
+        """不传 pool 时行为与旧版一致 (只查基座, 向后兼容)."""
+        from src.strategy import variant_backtester as vb
+
+        panel = _synthetic_panel()
+        mods = self._dup_modules(panel)
+        monkeypatch.setattr(vb, "load_factor_module", lambda fid: mods.get(fid))
+        # newf 与 BAB/high52w (BaseMod=close) 相关 1.0 → 无 pool 时仍被拦 (基座查重)
+        dup = vb._duplicate_factor_check(panel, ["BAB", "high52w", "newf"])
+        assert dup == "newf"
