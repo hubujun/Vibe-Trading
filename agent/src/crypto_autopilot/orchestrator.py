@@ -42,6 +42,13 @@ from src.crypto_autopilot.panel_builder import PanelBuilder
 from src.crypto_autopilot.paper_engine import PaperEngine
 from src.crypto_autopilot.paper_monitor import PaperMonitor
 from src.crypto_autopilot.promotion import PromotionGate
+from src.crypto_autopilot.rules_engine import (
+    DEFAULT_STATE_PATH,
+    RuleConfig,
+    RuleState,
+    RuleVerdict,
+    evaluate as evaluate_rules,
+)
 from src.crypto_autopilot.risk_monitor import RiskMonitor
 from src.crypto_autopilot.types import (
     FactorCandidate,
@@ -170,6 +177,8 @@ class AutopilotOrchestrator:
             shadow_mode=self.config.live_shadow_enabled,
         )
         self._risk_monitor: RiskMonitor = RiskMonitor(config=self.config)
+        # 规则引擎状态 (equity 日初基线 / 连亏计数, 跨 tick 持久化) — 2026-08-30
+        self._rule_state: RuleState = RuleState.load(DEFAULT_STATE_PATH)
         self._feedback: FeedbackAnalyzer = FeedbackAnalyzer(config=self.config)
         # Long-window parquet history backing statistical evaluation.
         self._history: HistoryStore = HistoryStore()
@@ -620,6 +629,111 @@ class AutopilotOrchestrator:
 
         self._pending_candidates = remaining
 
+    def _evaluate_trading_rules(self) -> RuleVerdict:
+        """评估老胡 5 条交易纪律 (规则引擎), 维护日初权益基线.
+
+        跨日自动重置 (day 变化 → 新基线/清零连亏). equity 基线:
+        live 阶段从 OKX 账户快照取; paper 阶段无权益接口 → 跳过日内熔断
+        (周四五/静默/平仓/连亏规则仍生效).
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from src.crypto_autopilot.rules_engine import RuleConfig  # noqa: F811
+        from src.strategy.macro_events import events_on
+
+        cfg = RuleConfig(daily_loss_pct=self.config.kill_loss_pct)
+        now_local = datetime.now(ZoneInfo(cfg.trade_tz))
+        today = now_local.strftime("%Y-%m-%d")
+
+        # 跨日重置
+        if self._rule_state.day != today:
+            self._rule_state = RuleState(day=today)
+            logger.info("rules: 新交易日 %s — 重置规则状态", today)
+
+        # equity: live 阶段读账户快照; 首次 tick 建立日初基线
+        equity_now: float | None = None
+        try:
+            if self._live_executor is not None:
+                equity_now = self._live_executor.read_account_equity()
+        except Exception:  # noqa: BLE001
+            equity_now = None
+        if equity_now and equity_now > 0:
+            if not self._rule_state.equity_baseline:
+                self._rule_state.equity_baseline = equity_now
+                logger.info("rules: 日初权益基线 = %.2f", equity_now)
+            # 同步喂给 risk_monitor 的日级熔断 (复用其 fail-safe)
+            try:
+                self._risk_monitor.check_daily_loss(
+                    equity_now, self._rule_state.equity_baseline
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        # 今日逐笔平仓 (连亏判断, 老胡: 连续 3 笔亏损当日停)
+        closed_today: list[dict] = []
+        try:
+            from src.crypto_autopilot.trade_ledger import (
+                autopilot_trades_path, read_trade_records,
+            )
+            recs = read_trade_records(
+                autopilot_trades_path(_default_runtime_root())
+            )
+            for r in recs:
+                ts = str(r.get("ts") or r.get("closed_at") or "")
+                if ts[:10] == today and r.get("realized_pnl") is not None:
+                    closed_today.append(r)
+        except Exception:  # noqa: BLE001
+            closed_today = []
+
+        # 宏观事件 (带 time 字段的才参与静默窗口)
+        events = []
+        try:
+            events = events_on() or []
+        except Exception:  # noqa: BLE001
+            events = []
+
+        verdict = evaluate_rules(
+            now=now_local,
+            state=self._rule_state,
+            equity_now=equity_now,
+            closed_trades_today=closed_today,
+            events=events,
+            cfg=cfg,
+        )
+        self._rule_state.save(DEFAULT_STATE_PATH)
+        return verdict
+
+    def _trip_halt(self, reason: str) -> None:
+        """规则熔断 → 触发 risk_monitor 的 kill switch (halt sentinel)."""
+        try:
+            self._risk_monitor.trigger_halt(reason)
+        except Exception:  # noqa: BLE001
+            logger.exception("rules: trigger_halt failed: %s", reason)
+
+    def _force_close_all(self, reason: str) -> None:
+        """强制平仓全部持仓 (paper 全平; live 尽力逐个卖出)."""
+        logger.warning("rules: 强制平仓 — %s", reason)
+        try:
+            self._paper_engine.close_all_positions()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rules: paper close_all failed: %s", exc)
+        if self._live_executor is not None:
+            try:
+                positions = self._live_executor.read_positions_list()
+                for pos in positions or []:
+                    sym = pos.get("instId") or pos.get("symbol")
+                    if sym:
+                        self._live_executor.place_order(sym, "sell", 0.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("rules: live close_all failed: %s", exc)
+        self._notifier.notify(
+            "force_close",
+            "强制平仓 (规则触发)",
+            reason,
+            meta={"ts": _utc_now().isoformat()},
+        )
+
     async def _tick_trade(self) -> None:
         """Check risk, get factor signals, place orders via PaperEngine or LiveExecutor."""
         self._set_phase(PipelinePhase.PAPER_TRADING)
@@ -627,6 +741,25 @@ class AutopilotOrchestrator:
         # Check risk monitor.
         if self._risk_monitor.is_halted():
             logger.warning("tick_trade: trading halted by risk monitor")
+            return
+
+        # 规则引擎: 老胡 5 条交易纪律 (2026-08-30 实盘就绪)
+        # 周四五谨慎 / 宏观事件静默 / 23:00 强制平仓 / 连亏 3 笔当日停 / 日内亏损熔断
+        verdict = self._evaluate_trading_rules()
+        if verdict.action == "halt":
+            logger.warning("tick_trade: rules triggered HALT — %s", verdict.reason)
+            self._trip_halt(f"规则熔断: {verdict.reason}")
+            return
+        if verdict.action == "force_close":
+            logger.warning("tick_trade: rules force_close — %s", verdict.reason)
+            self._force_close_all(verdict.reason or "规则触发")
+            self._rule_state.force_closed = True
+            self._rule_state.save(DEFAULT_STATE_PATH)
+            return
+        if not verdict.can_trade:
+            logger.info("tick_trade: rules blocked — %s", verdict.reason)
+            # 新订单被禁止, 但持仓管理 (止损止盈) 照常执行
+            self._manage_positions()
             return
 
         # Phase 4: staged live scale-up — cheap file read, no-op on most
