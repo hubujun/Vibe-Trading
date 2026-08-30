@@ -393,6 +393,22 @@ def register_workbench_routes(
     if require_auth is None:
         require_auth = h.require_auth
 
+    def _paper_initial_funding() -> float:
+        """模拟盘初始资金 = mandate 总敞口上限 (与实盘单源一致, 2026-08-30)."""
+        cached = getattr(_paper_initial_funding, "_cached", None)
+        if cached is not None:
+            return cached
+        funding = 1500.0
+        try:
+            from src.live.mandate.store import load_mandate
+            m = load_mandate("okx")
+            if m and m.hard_caps.max_total_exposure_usd:
+                funding = float(m.hard_caps.max_total_exposure_usd)
+        except Exception:  # noqa: BLE001
+            pass
+        _paper_initial_funding._cached = funding
+        return funding
+
     @app.get(
         "/api/factors/health",
         dependencies=[Depends(require_auth)],
@@ -475,8 +491,12 @@ def register_workbench_routes(
                 paper: dict[str, Any] = {}
                 try:
                     st = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+                    initial = _paper_initial_funding()
+                    nav = st.get("nav")
                     paper = {
-                        "nav": st.get("nav"),
+                        "nav": nav,
+                        "initial_funding_usd": initial,
+                        "equity_usd": round(initial * (nav if isinstance(nav, (int, float)) else 1.0), 2),
                         "started_at": st.get("started_at"),
                         "last_signal_date": st.get("last_signal_date"),
                         "longs": st.get("last_longs", []),
