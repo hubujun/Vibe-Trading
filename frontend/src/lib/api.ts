@@ -1943,7 +1943,12 @@ export interface WorkbenchResponse {
     active: AutopilotFactorInfo[];
     pending: string[];
     retired: AutopilotRetiredFactor[];
-    zoo: Array<{ alpha_id: string; nickname: string; theme: string[] }>;
+    zoo: Array<{
+      alpha_id: string;
+      nickname: string;
+      theme: string[];
+      health?: FactorHealthStats | null;
+    }>;
     zoo_count: number;
     updated_at: string | null;
   } | null;
@@ -2085,6 +2090,18 @@ export interface AutopilotFactorInfo {
   alpha_t_train: number | null;
   alpha_t_test: number | null;
   category: string | null;
+  /** 因子体检附加: IC/IR/IC+ 率/趋势 (与学术层同口径, 无数据为 null) */
+  health?: FactorHealthStats | null;
+}
+
+/** 因子体检指标 (factor_health.py 全窗口截面 rank IC 口径). */
+export interface FactorHealthStats {
+  ic: number | null;
+  ic_ir: number | null;
+  ic_pos: number | null;
+  ic_trend: "stable" | "weakening" | "decaying" | "insufficient" | null;
+  ls_annual?: number | null;
+  ls_sharpe?: number | null;
 }
 
 export interface AutopilotRetiredFactor {

@@ -1198,7 +1198,9 @@ export function Workbench() {
                           <th className="text-right py-2 px-2"><Term k="winRate">胜率</Term></th>
                           <th className="text-right py-2 px-2"><Term k="pf">Profit Factor</Term></th>
                           <th className="text-right py-2 px-2"><Term k="sharpe">Sharpe</Term></th>
-                          <th className="text-right py-2 px-2"><Term k="ic">IC</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="ic">IC均值</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="ir">IR</Term></th>
+                          <th className="text-right py-2 px-2"><Term k="icPos">IC+ 比率</Term></th>
                           <th className="text-right py-2 px-2"><Term k="pnl">已实现 PnL</Term></th>
                         </tr>
                       </thead>
@@ -1219,8 +1221,14 @@ export function Workbench() {
                               <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.sharpe ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                 {s ? s.sharpe.toFixed(2) : "--"}
                               </td>
-                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.ic_mean ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                                {f.ic_mean != null ? `${f.ic_mean >= 0 ? "+" : ""}${f.ic_mean.toFixed(3)}` : "--"}
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.health?.ic ?? f.ic_mean ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {f.health?.ic != null ? `${f.health.ic >= 0 ? "+" : ""}${f.health.ic.toFixed(4)}` : f.ic_mean != null ? `${f.ic_mean >= 0 ? "+" : ""}${f.ic_mean.toFixed(3)}` : "--"}
+                              </td>
+                              <td className={cn("py-2 px-2 text-right font-mono text-xs", (f.health?.ic_ir ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {f.health?.ic_ir != null ? `${f.health.ic_ir >= 0 ? "+" : ""}${f.health.ic_ir.toFixed(3)}` : "--"}
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-xs">
+                                {f.health?.ic_pos != null ? `${(f.health.ic_pos * 100).toFixed(1)}%` : "--"}
                               </td>
                               <td className={cn("py-2 px-2 text-right font-mono text-xs", (s?.realized_pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                 {s ? `${s.realized_pnl >= 0 ? "+" : ""}$${s.realized_pnl.toLocaleString()}` : "--"}
@@ -1238,17 +1246,47 @@ export function Workbench() {
                 )}
                 {minedCandidates.length ? (
                   <>
-                    <div className="text-xs text-muted-foreground mt-4 mb-2">zoo 候选（未激活未退役）</div>
-                    <div className="flex flex-wrap gap-2">
-                      {minedCandidates.slice(0, 24).map(z => (
-                        <span key={z.alpha_id} className="rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 text-[11px] font-mono text-muted-foreground">
-                          {z.alpha_id.replace("crypto_mined_", "")}
-                          {z.nickname && <span className="ml-1 text-muted-foreground/60">{z.nickname}</span>}
-                        </span>
-                      ))}
-                      {minedCandidates.length > 24 && (
-                        <span className="text-[11px] text-muted-foreground">+{minedCandidates.length - 24} 个…</span>
-                      )}
+                    <div className="text-xs text-muted-foreground mt-4 mb-2">
+                      zoo 候选（未激活未退役 · {minedCandidates.length} 个 · 指标来自因子体检）
+                    </div>
+                    <div className="overflow-x-auto max-h-[300px] overflow-y-auto rounded-lg border border-border/60">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-card">
+                          <tr className="text-xs text-muted-foreground border-b">
+                            <th className="text-left py-2 pr-3">因子</th>
+                            <th className="text-right py-2 px-2"><Term k="ic">IC均值</Term></th>
+                            <th className="text-right py-2 px-2"><Term k="ir">IR</Term></th>
+                            <th className="text-right py-2 px-2"><Term k="icPos">IC+ 比率</Term></th>
+                            <th className="text-left py-2 px-2">趋势</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {minedCandidates.map(z => (
+                            <tr key={z.alpha_id} className="border-b border-muted/50">
+                              <td className="py-1.5 pr-3">
+                                <span className="font-mono text-xs">{z.alpha_id.replace("crypto_mined_", "")}</span>
+                                {z.nickname && <span className="ml-1.5 text-[11px] text-muted-foreground">{z.nickname}</span>}
+                              </td>
+                              <td className={cn("py-1.5 px-2 text-right font-mono text-xs", (z.health?.ic ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {z.health?.ic != null ? `${z.health.ic >= 0 ? "+" : ""}${z.health.ic.toFixed(4)}` : "--"}
+                              </td>
+                              <td className={cn("py-1.5 px-2 text-right font-mono text-xs", (z.health?.ic_ir ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                {z.health?.ic_ir != null ? `${z.health.ic_ir >= 0 ? "+" : ""}${z.health.ic_ir.toFixed(3)}` : "--"}
+                              </td>
+                              <td className="py-1.5 px-2 text-right font-mono text-xs">
+                                {z.health?.ic_pos != null ? `${(z.health.ic_pos * 100).toFixed(1)}%` : "--"}
+                              </td>
+                              <td className="py-1.5 px-2 text-xs">
+                                {z.health?.ic_trend === "stable" && <span className="text-emerald-400">稳定</span>}
+                                {z.health?.ic_trend === "weakening" && <span className="text-amber-400">转弱</span>}
+                                {z.health?.ic_trend === "decaying" && <span className="text-rose-400">衰减</span>}
+                                {z.health?.ic_trend === "insufficient" && <span className="text-muted-foreground">样本不足</span>}
+                                {!z.health?.ic_trend && <span className="text-muted-foreground">--</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </>
                 ) : null}
