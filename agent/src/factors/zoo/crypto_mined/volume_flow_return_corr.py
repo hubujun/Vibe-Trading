@@ -1,27 +1,22 @@
-"""crypto mined VOLUME: volume flow vs return correlation."""
+"""Crypto volume-flow / price-return correlation persistence factor."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import (
-    delta,
-    rank,
-    safe_div,
-    ts_corr,
-)
+from src.factors.base import decay_linear, delta, rank, safe_div, ts_corr
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_flow_return_corr",
     "nickname": "VolumeFlowReturnCorr",
     "theme": ["volume"],
-    "formula_latex": "\\text{rank}\\left(\\rho_{15}\\left(\\frac{\\Delta_1 P}{P_{t-1}}, \\frac{\\Delta_1 V}{V_{t-1}}\\right)\\right)",
+    "formula_latex": "\\mathrm{rank}(\\mathrm{decay}_{5}(\\rho_{20}(\\Delta V/V, \\Delta C/C)))",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 3,
-    "min_warmup_bars": 16,
-    "notes": "Cross-sectional rank of rolling correlation between daily returns and daily volume changes; high rank identifies volume-confirmed price moves.",
+    "decay_horizon": 5,
+    "min_warmup_bars": 25,
+    "notes": "Cross-sectional rank of the persistence of the rolling correlation between volume-flow and price returns.",
 }
 
 
@@ -29,8 +24,12 @@ def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
 
-    ret_1 = safe_div(delta(close, 1), close.shift(1))
-    volume_change_1 = safe_div(delta(volume, 1), volume.shift(1))
-    flow_corr = ts_corr(ret_1, volume_change_1, 15)
+    d_close = delta(close, 1)
+    d_volume = delta(volume, 1)
 
-    return rank(flow_corr)
+    close_ret = safe_div(d_close, close - d_close)
+    volume_flow = safe_div(d_volume, volume - d_volume)
+
+    corr = ts_corr(close_ret, volume_flow, 20)
+
+    return rank(decay_linear(corr, 5))
