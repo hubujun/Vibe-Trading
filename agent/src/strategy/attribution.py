@@ -62,21 +62,26 @@ def _load_state(strategy: dict) -> dict:
     return json.loads(st.read_text(encoding="utf-8")) if st.exists() else {}
 
 
-def _fetch_panel() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """拉 17 币 close/volume 面板 (与 daily_signal 一致)."""
-    closes, volumes = {}, {}
+def _fetch_panel() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """拉 17 币 close/volume/high/low 面板 (与 daily_signal 一致)."""
+    closes, volumes, highs, lows = {}, {}, {}, {}
     for s in SYMBOLS:
         df = fetch_okx_daily(s)
         if df.empty or len(df) < 300:
             continue
         closes[s] = df["close"]
         volumes[s] = df["volume"]
+        highs[s] = df["high"]
+        lows[s] = df["low"]
     close_df = pd.DataFrame(closes).ffill().dropna()
     volume_df = pd.DataFrame(volumes).reindex(close_df.index).ffill()
-    return close_df, volume_df
+    high_df = pd.DataFrame(highs).reindex(close_df.index).ffill()
+    low_df = pd.DataFrame(lows).reindex(close_df.index).ffill()
+    return close_df, volume_df, high_df, low_df
 
 
 def _factor_scores(close_df: pd.DataFrame, volume_df: pd.DataFrame,
+                   high_df: pd.DataFrame, low_df: pd.DataFrame,
                    spec: dict) -> dict[str, pd.DataFrame]:
     """重放各因子 (非合成) 的横截面得分序列. 返回 {fid: DataFrame(每行=日期, 列=币)}."""
     out = {}
@@ -85,7 +90,8 @@ def _factor_scores(close_df: pd.DataFrame, volume_df: pd.DataFrame,
         if mod is None:
             continue
         try:
-            f = mod.compute({"close": close_df, "volume": volume_df})
+            f = mod.compute({"close": close_df, "volume": volume_df,
+                             "high": high_df, "low": low_df})
         except Exception:
             continue
         f = f.reindex(close_df.index)
@@ -196,8 +202,8 @@ def attribution_latest(strategy_id: str) -> dict | None:
     if spec is None:
         return None
     try:
-        close_df, volume_df = _fetch_panel()
-        factor_scores = _factor_scores(close_df, volume_df, spec)
+        close_df, volume_df, high_df, low_df = _fetch_panel()
+        factor_scores = _factor_scores(close_df, volume_df, high_df, low_df, spec)
         d = pd.Timestamp(t["from"]).date()
         scores_all = {}
         for fid, fs in factor_scores.items():
@@ -235,8 +241,8 @@ def main() -> int:
         print("ERROR: signal_definition 无法解析")
         return 1
 
-    close_df, volume_df = _fetch_panel()
-    factor_scores = _factor_scores(close_df, volume_df, spec)
+    close_df, volume_df, high_df, low_df = _fetch_panel()
+    factor_scores = _factor_scores(close_df, volume_df, high_df, low_df, spec)
 
     # 预计算每个目标 trade from 日期的因子得分行
     results = []

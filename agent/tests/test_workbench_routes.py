@@ -295,7 +295,7 @@ class TestWorkbenchDataConsistency:
         combo_dir = tmp_path / ".vibe-trading" / "runs" / "paper_combo"
         combo_dir.mkdir(parents=True, exist_ok=True)
         (combo_dir / "variant_backtests.json").write_text(
-            json.dumps({"meta": {"logic_version": 3}, **cache}), encoding="utf-8"
+            json.dumps({"meta": {"logic_version": 4}, **cache}), encoding="utf-8"
         )
         monkeypatch.setattr(vb, "CACHE_PATH", combo_dir / "variant_backtests.json")
         _write_combo_state(tmp_path, {"nav": 1.0, "trades": []})
