@@ -273,11 +273,12 @@ def fetch_okx_daily(symbol: str) -> pd.DataFrame | None:
     df["volume"] = df["vol"].astype(float)
     df["high"] = df["high"].astype(float)
     df["low"] = df["low"].astype(float)
-    return df[["close", "volume", "high", "low"]]
+    df["open"] = df["open"].astype(float)
+    return df[["close", "volume", "high", "low", "open"]]
 
 
 def fetch_panel() -> dict[str, pd.DataFrame] | None:
-    """拉 17 币 panel (close + volume + high + low), 对齐后返回; 数据不足返回 None.
+    """拉 17 币 panel (close + volume + high + low + open), 对齐后返回; 数据不足返回 None.
 
     新上市币 (TRUMP/LAB 等 <800 天) 有多少数据测多少天 —
     对齐时 dropna 自动用公共区间 (最早上市的币决定窗口长度).
@@ -298,14 +299,16 @@ def fetch_panel() -> dict[str, pd.DataFrame] | None:
     volume = pd.DataFrame({s: f["volume"] for s, f in frames.items()})
     high = pd.DataFrame({s: f["high"] for s, f in frames.items()})
     low = pd.DataFrame({s: f["low"] for s, f in frames.items()})
+    open_ = pd.DataFrame({s: f["open"] for s, f in frames.items()})
     # 各币保留自己的可用长度: 新币前段保持 NaN (有多少测多少, 不拉短老币窗口)
     close = close.dropna(axis=1, how="all").ffill()
     volume = volume.reindex(close.index).ffill()
     high = high.reindex(close.index).ffill()
     low = low.reindex(close.index).ffill()
+    open_ = open_.reindex(close.index).ffill()
     if close.shape[0] < 300 or close.shape[1] < 4:
         return None
-    return {"close": close, "volume": volume, "high": high, "low": low}
+    return {"close": close, "volume": volume, "high": high, "low": low, "open": open_}
 
 
 # ============================================================================
@@ -441,7 +444,7 @@ def backtest_variant(
 
 #: 回测缓存逻辑版本 — 回测逻辑变更时 +1, 缓存自动失效全量重算
 #: (v2: 动态多空比 + 板块上限 + 波动率目标; v3: + 疯牛保险普涨降仓, 与 daily_signal 一致)
-CACHE_LOGIC_VERSION = 4
+CACHE_LOGIC_VERSION = 5
 
 
 def load_backtest_cache() -> dict[str, dict[str, Any]]:
@@ -891,6 +894,7 @@ def run_variant_backtests(
     hypotheses_path: Path = HYPOTHESES_PATH,
     cache_path: Path = CACHE_PATH,
     panel: dict[str, pd.DataFrame] | None = None,
+    include_promoted: bool = True,
 ) -> dict[str, Any]:
     """对所有无缓存的 exploring 变体自动回测 + 晋升.
 
@@ -944,11 +948,18 @@ def run_variant_backtests(
                 except Exception:  # noqa: BLE001
                     logger.warning("variant backtest: rejudge promote failed for %s", h.hypothesis_id)
 
-    candidates = [
-        h for h in registry.list()
-        if str(h.status) == "exploring" and str(h.signal_definition).startswith("combo_variant:")
-        and h.signal_definition not in cache
-    ]
+    candidates: list[tuple[Any, bool]] = []
+    for h in registry.list():
+        sd = str(h.signal_definition)
+        if not sd.startswith("combo_variant:") or sd in cache:
+            continue
+        st = str(h.status)
+        if st == "exploring":
+            candidates.append((h, False))
+        elif include_promoted and st in ("testing", "validated", "monitoring"):
+            # 清缓存/逻辑版本 bump 后, 已晋升变体指标会丢 - 补算但只写
+            # 缓存, 不重新流转状态/不播种 (它们已经过晋升闸门).
+            candidates.append((h, True))
     if not candidates:
         if cache_path == CACHE_PATH:
             save_backtest_cache(cache)
@@ -973,46 +984,48 @@ def run_variant_backtests(
             for f in p["factors"]:
                 if f not in pool_factors:
                     pool_factors.append(f)
-    for hyp in candidates[:max_per_run]:
+    for hyp, is_promoted_refill in candidates[:max_per_run]:
         parsed = parse_signal_definition(str(hyp.signal_definition))
         if parsed is None:
             continue
-        # 机构实践: 因子相关性去重 — 新增因子与基座/池内因子高相关 → 无增量, 直接否决
-        dup = _duplicate_factor_check(panel, parsed["factors"], pool=pool_factors)
-        if dup is not None:
-            dup_skipped.append(str(hyp.signal_definition))
-            try:
-                registry.update(
-                    hyp.hypothesis_id,
-                    status="rejected",
-                    invalidation_notes=(
-                        f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
-                        f"因子去重 — {dup} 与基座因子截面相关 >0.9, 无增量 alpha"
-                    ),
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning("variant backtest: dup reject failed for %s", hyp.hypothesis_id)
-            continue
-        # 分时段稳定性闸门: 挖掘因子前/后半段 IC 符号必须一致 (防时变因子/过拟合)
-        stab, ic_f, ic_b = _factor_split_ic_check(panel, parsed["factors"])
-        if stab is not None:
-            stab_skipped.append(str(hyp.signal_definition))
-            try:
-                if ic_f is None or ic_b is None:
-                    reason = f"{stab} 因子不可用 (模块缺失或 compute 失败)"
-                else:
-                    reason = f"{stab} 分时段 IC 符号反转 (前 {ic_f} / 后 {ic_b}), 时变不稳定"
-                registry.update(
-                    hyp.hypothesis_id,
-                    status="rejected",
-                    invalidation_notes=(
-                        f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
-                        f"分时段稳定性 — {reason}"
-                    ),
-                )
-            except Exception:  # noqa: BLE001
-                logger.warning("variant backtest: stab reject failed for %s", hyp.hypothesis_id)
-            continue
+        # 已晋升补算: 跳过去重/稳定性闸门 (已过闸门的旧变体, 只补指标)
+        if not is_promoted_refill:
+            # 机构实践: 因子相关性去重 - 新增因子与基座/池内因子高相关, 无增量直接否决
+            dup = _duplicate_factor_check(panel, parsed["factors"], pool=pool_factors)
+            if dup is not None:
+                dup_skipped.append(str(hyp.signal_definition))
+                try:
+                    registry.update(
+                        hyp.hypothesis_id,
+                        status="rejected",
+                        invalidation_notes=(
+                            f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                            f"因子去重 - {dup} 与基座因子截面相关 >0.9, 无增量 alpha"
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("variant backtest: dup reject failed for %s", hyp.hypothesis_id)
+                continue
+            # 分时段稳定性闸门: 挖掘因子前/后半段 IC 符号必须一致 (防时变因子/过拟合)
+            stab, ic_f, ic_b = _factor_split_ic_check(panel, parsed["factors"])
+            if stab is not None:
+                stab_skipped.append(str(hyp.signal_definition))
+                try:
+                    if ic_f is None or ic_b is None:
+                        reason = f"{stab} 因子不可用 (模块缺失或 compute 失败)"
+                    else:
+                        reason = f"{stab} 分时段 IC 符号反转 (前 {ic_f} / 后 {ic_b}), 时变不稳定"
+                    registry.update(
+                        hyp.hypothesis_id,
+                        status="rejected",
+                        invalidation_notes=(
+                            f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}: "
+                            f"分时段稳定性 - {reason}"
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("variant backtest: stab reject failed for %s", hyp.hypothesis_id)
+                continue
         metrics = backtest_variant(
             panel,
             parsed["factors"],

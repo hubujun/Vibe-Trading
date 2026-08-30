@@ -183,10 +183,37 @@ class TestRunPipeline:
         assert result["backtested"] == []
         assert result["skipped"] == 0
 
-    def test_no_candidates(self, tmp_path: Path) -> None:
+    def test_promoted_refill_when_cache_missing(self, tmp_path: Path) -> None:
+        """已晋升 (testing) 变体缺缓存时自动补算 (清缓存后指标不丢), 不重新流转状态."""
         hypo_path = tmp_path / "h.json"
         cache_path = tmp_path / "cache.json"
-        _seed_variant(hypo_path, "combo_variant: weights={BAB:0.5,high52w:0.5}", status="testing")
+        sd = "combo_variant: weights={BAB:0.5,high52w:0.5}"
+        _seed_variant(hypo_path, sd, status="testing")
+        panel = _synthetic_panel()
+
+        result = run_variant_backtests(
+            max_per_run=5, hypotheses_path=hypo_path, cache_path=cache_path, panel=panel,
+        )
+
+        # 补算执行: 变体进了 backtested, 缓存已写入
+        assert len(result["backtested"]) == 1
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        assert sd in cache
+        # 状态不被重新流转 (仍是 testing, 不降级不播种)
+        from src.strategy import variant_backtester as vb
+
+        reg = vb.HypothesisRegistry(hypo_path)
+        assert str(reg.list()[0].status) == "testing"
+
+    def test_promoted_refill_skipped_when_cached(self, tmp_path: Path) -> None:
+        """已晋升变体有缓存时不重复回测."""
+        hypo_path = tmp_path / "h.json"
+        cache_path = tmp_path / "cache.json"
+        sd = "combo_variant: weights={BAB:0.5,high52w:0.5}"
+        _seed_variant(hypo_path, sd, status="testing")
+        cache_path.write_text(
+            json.dumps({sd: {"annual": 15.0, "sharpe": 1.0, "max_dd": -5.0}}), encoding="utf-8"
+        )
         panel = _synthetic_panel()
 
         result = run_variant_backtests(
@@ -194,6 +221,7 @@ class TestRunPipeline:
         )
 
         assert result["backtested"] == []
+        assert result["skipped"] == 0
 
     def test_auto_seed_idempotent(self, tmp_path: Path, monkeypatch) -> None:
         """晋升变体自动播种; 同 signal_definition 重复播种被去重跳过."""
