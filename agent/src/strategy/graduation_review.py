@@ -159,8 +159,8 @@ def main() -> int:
             print("  ERROR: signal_definition 无法解析")
             continue
 
-        close_df, volume_df, high_df, low_df = _fetch_panel()
-        factor_scores = _factor_scores(close_df, volume_df, high_df, low_df, spec)
+        close_df, volume_df, high_df, low_df, open_df = _fetch_panel()
+        factor_scores = _factor_scores(close_df, volume_df, high_df, low_df, open_df, spec)
         attribs = _per_trade_ic(state.get("trades") or [], close_df, factor_scores, spec)
 
         # 1. 因子 IC 汇总
