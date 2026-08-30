@@ -42,7 +42,9 @@ _POLL_INTERVAL_S = 60.0
 
 #: Heartbeat age beyond which the autopilot is considered down. Generous
 #: relative to the tick cadence so a momentarily slow tick is not flagged.
-_STALE_AFTER_S = 60
+#: 对齐 orchestrator 设计 (注释里 stale 阈值 = 300s): collect+mine+同步回测
+#: 可让心跳缺口超过 60s, 健康 loop 不该被判死。
+_STALE_AFTER_S = 300
 
 #: Event kind emitted when the loop goes stale.
 _DOWN_KIND = "autopilot_down"
