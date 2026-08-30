@@ -422,6 +422,28 @@ class LiveExecutor:
     # Direct order placement (mandate-enforced)
     # ------------------------------------------------------------------
 
+    def read_account_equity(self) -> float | None:
+        """当前账户权益 USD (规则引擎日初基线/日内熔断用), 读不到返回 None."""
+        try:
+            snap = self._build_okx_read_callables()["read_balance"]()
+            total = (snap or {}).get("account", {}).get("total_equity")
+            val = float(total) if total is not None else 0.0
+            return val if val > 0 else None
+        except Exception:  # noqa: BLE001
+            logger.debug("read_account_equity failed", exc_info=True)
+            return None
+
+    def read_positions_list(self) -> list[dict]:
+        """当前持仓列表 (规则引擎强制平仓用), 读不到返回 []."""
+        try:
+            raw = self._build_okx_read_callables()["read_positions"]()
+            if isinstance(raw, dict):
+                return raw.get("data") or raw.get("positions") or []
+            return raw or []
+        except Exception:  # noqa: BLE001
+            logger.debug("read_positions_list failed", exc_info=True)
+            return []
+
     def place_order(self, symbol: str, side: str, notional: float) -> dict[str, Any]:
         """Place a market order on the OKX live account with mandate enforcement.
 
