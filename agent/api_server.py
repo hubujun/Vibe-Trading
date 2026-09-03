@@ -283,6 +283,10 @@ register_combo_routes(app)
 from src.api.workbench_routes import register_workbench_routes  # noqa: E402
 register_workbench_routes(app)
 
+# --- Event Hunter (事件猎手: 百倍杠杆机会跟踪, 本地增强) ---
+from src.api.hunter_routes import register_hunter_routes  # noqa: E402
+register_hunter_routes(app)
+
 # --- Options Lab (vol surface + Greeks) ---
 from src.api.options_lab_routes import register_options_lab_routes  # noqa: E402
 register_options_lab_routes(app)

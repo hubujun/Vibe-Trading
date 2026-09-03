@@ -571,6 +571,28 @@ export const api = {
     request<WorkbenchResponse>("/api/workbench", { signal, cache: "no-store" }),
   getFactorHealth: (force = false, signal?: AbortSignal) =>
     request<FactorHealthResponse>(`/api/factors/health?force=${force}`, { signal, cache: "no-store" }),
+  // ---- 事件猎手 (hunter): 候选机会 + 开仓账本 ----
+  getHunter: (signal?: AbortSignal) =>
+    request<HunterResponse>("/api/hunter", { signal, cache: "no-store" }),
+  createHunterOpportunity: (body: Partial<HunterOpportunity>) =>
+    request<HunterOpportunity>("/api/hunter/opportunities", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  patchHunterOpportunity: (id: string, body: Record<string, unknown>) =>
+    request<HunterOpportunity>(`/api/hunter/opportunities/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  deleteHunterOpportunity: (id: string) =>
+    request<{ ok: boolean }>(`/api/hunter/opportunities/${id}`, { method: "DELETE" }),
+  createHunterShot: (body: Partial<HunterShot>) =>
+    request<HunterShot>("/api/hunter/shots", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteHunterShot: (id: string) =>
+    request<{ ok: boolean }>(`/api/hunter/shots/${id}`, { method: "DELETE" }),
   transitionStrategy: (strategyId: string, action: string, note?: string) =>
     request<WorkbenchStrategy>(`/api/workbench/strategies/${strategyId}/transition`, {
       method: "POST",
@@ -1911,6 +1933,47 @@ export interface WorkbenchStrategy {
   review?: Partial<WorkbenchReview>;
   /** 该策略自己的回测指标 (来自变体自动回测缓存) */
   strategy_backtest?: { annual?: number | null; sharpe?: number | null; max_dd?: number | null; cum?: number | null; error?: string };
+}
+
+/** 事件猎手 (hunter): 百倍杠杆事件机会跟踪 — 候选清单 + 开仓账本. */
+export type HunterOpportunityStatus =
+  | "watching"
+  | "triggered"
+  | "won"
+  | "lost"
+  | "discarded";
+
+export interface HunterOpportunity {
+  id: string;
+  inst: string;
+  kind: string;
+  direction: "long" | "short";
+  catalyst: string;
+  trigger: string;
+  plan: string;
+  note: string;
+  status: HunterOpportunityStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HunterShot {
+  id: string;
+  inst: string;
+  direction: "long" | "short";
+  leverage: number;
+  margin: number;
+  entry: number | null;
+  exit: number | null;
+  pnl: number | null;
+  outcome: "open" | "won" | "lost";
+  at: string;
+  note: string;
+}
+
+export interface HunterResponse {
+  opportunities: HunterOpportunity[];
+  shots: HunterShot[];
 }
 
 /** 因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照. */

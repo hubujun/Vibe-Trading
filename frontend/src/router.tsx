@@ -23,6 +23,9 @@ const Workbench = lazy(() =>
 const FactorHealth = lazy(() =>
   import("@/pages/FactorHealth").then((m) => ({ default: m.FactorHealth })),
 );
+const Hunter = lazy(() =>
+  import("@/pages/Hunter").then((m) => ({ default: m.Hunter })),
+);
 const Scheduled = lazy(() =>
   import("@/pages/Scheduled").then((m) => ({ default: m.Scheduled })),
 );
@@ -88,6 +91,7 @@ export const router = createBrowserRouter([
       { path: "/autopilot", element: <Navigate to="/workbench" replace /> },
       { path: "/workbench", element: wrap(Workbench) },
       { path: "/workbench/factors", element: wrap(FactorHealth) },
+      { path: "/workbench/hunter", element: wrap(Hunter) },
     ],
   },
 ]);
