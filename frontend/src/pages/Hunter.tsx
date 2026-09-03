@@ -877,7 +877,7 @@ export function Hunter() {
               })()}
             </div>
 
-            {!paper?.listing && !paper?.squeeze ? (
+            {!paper?.listing && !paper?.squeeze && !paper?.resonance ? (
               <p className="px-4 py-6 text-center text-sm text-muted-foreground">
                 体检数据未生成 — 跑 <span className="font-mono">python3 ~/.hermes/scripts/hunter_paper.py</span>{" "}
                 与 <span className="font-mono">hunter_paper_squeeze.py</span> 后刷新
@@ -1022,6 +1022,89 @@ export function Hunter() {
                       结论：深负费率不是"轧空蓄势"，是下跌动量延续——事件后做多胜率 40% 低于基准 49%，
                       越深负越跌。触发器的"轧空候选"应理解为"空头趋势观察"，追多危险；
                       真要等点火，必须等动量衰竭 + 放量反包确认，费率负本身不是进场理由。
+                    </p>
+                  </div>
+                )}
+
+                {/* ---- resonance 多周期共振 ---- */}
+                {paper?.resonance && (
+                  <div className="rounded-lg border bg-background p-3">
+                    <h3 className="text-[13px] font-semibold">
+                      多周期 KDJ+MACD 共振 · 老币方向检验
+                      <span className="ml-2 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] text-violet-500">
+                        3币 × {paper.resonance.days}天 · 双边成本 {paper.resonance.cost_pct}%
+                      </span>
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      1m/5m/15m 三周期同刻 KDJ(9,3,3)+MACD(12,26,9) 共振（多头排列 = 理论买点）——
+                      共振时刻进场持有 1h，比混杂时刻强吗？
+                    </p>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                            <th className="px-2 py-2 font-medium">币种</th>
+                            <th className="px-2 py-2 font-medium text-right">多头共振占比</th>
+                            <th className="px-2 py-2 font-medium text-right">多头1h胜率</th>
+                            <th className="px-2 py-2 font-medium text-right">混杂基准胜率</th>
+                            <th className="px-2 py-2 font-medium text-right">胜率差</th>
+                            <th className="px-2 py-2 font-medium text-right">多头1h均值</th>
+                            <th className="px-2 py-2 font-medium text-right">混杂均值</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(paper.resonance.coins).map(([inst, c]) => {
+                            const h1 = c.holds?.["4"];
+                            const lg = h1?.long;
+                            const mx = h1?.mixed;
+                            if (!lg || !mx) return null;
+                            const diff = lg.win_rate - mx.win_rate;
+                            return (
+                              <tr key={inst} className="border-b border-border/40 last:border-0">
+                                <td className="px-2 py-1.5 font-mono text-[13px] font-medium">{inst}</td>
+                                <td className="px-2 py-1.5 text-right font-mono">
+                                  {c.long_pct}% ({c.long_n})
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono">{lg.win_rate}%</td>
+                                <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                                  {mx.win_rate}%
+                                </td>
+                                <td
+                                  className={cn(
+                                    "px-2 py-1.5 text-right font-mono",
+                                    diff >= 0 ? "text-emerald-500" : "text-rose-500"
+                                  )}
+                                >
+                                  {diff >= 0 ? "+" : ""}
+                                  {diff.toFixed(1)}pp
+                                </td>
+                                <td
+                                  className={cn(
+                                    "px-2 py-1.5 text-right font-mono",
+                                    lg.avg_pct >= 0 ? "text-emerald-500" : "text-rose-500"
+                                  )}
+                                >
+                                  {lg.avg_pct >= 0 ? "+" : ""}
+                                  {lg.avg_pct}%
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                                  {mx.avg_pct >= 0 ? "+" : ""}
+                                  {mx.avg_pct}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-2 rounded-md bg-rose-500/5 px-2.5 py-1.5 text-[11px] leading-relaxed text-rose-500/90">
+                      结论：走势中性的老牌币（BTC/DOGE）共振无 edge 甚至跑输——KDJ/MACD 滞后，共振出现时一波已
+                      走完，买在脉冲后段。TRUMP 表面正差要警惕：近 14 天恰逢单边趋势段，共振=滞后顺势（涨势里追多
+                      当然赢），行情一旦反转就会像 DOGE 那样反噬；75 个信号样本也不足以排除行情 beta。共振至多当
+                      "已有方向下的执行过滤器"，单独当入场系统，数据不支持（以老牌币结论为准）。
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      逐点核对图表（标注 K 线）：{paper.resonance.chart_file} · 买卖点明细：{paper.resonance.md_file}
                     </p>
                   </div>
                 )}
