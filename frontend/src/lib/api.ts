@@ -2015,9 +2015,27 @@ export interface HunterPaperSqueeze {
   base_win_rate: number | null;
   base_windows: number | null;
 }
+/** 玩法体检: 多周期 KDJ+MACD 共振检验 (hunter_paper_resonance.py). */
+export interface HunterPaperResonanceCoin {
+  boundaries: number;
+  long_pct: number;
+  long_n: number;
+  short_pct: number;
+  short_n: number;
+  holds: Record<string, Record<string, { n: number; win_rate: number; avg_pct: number }>>;
+}
+export interface HunterPaperResonance {
+  generated_at: string;
+  days: number;
+  cost_pct: number;
+  coins: Record<string, HunterPaperResonanceCoin>;
+  chart_file: string;
+  md_file: string;
+}
 export interface HunterPaperResponse {
   listing?: HunterPaperListing | null;
   squeeze?: HunterPaperSqueeze | null;
+  resonance?: HunterPaperResonance | null;
 }
 
 /** 因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照. */
