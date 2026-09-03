@@ -583,7 +583,7 @@ Paper-vs-live is a **structural per-broker runtime guard** (account-id format, h
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>7 つのファミリーに渡る 522 個の 事前構築 quant alpha</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>7 つのファミリーに渡る 562 個の 事前構築 quant alpha</sub></summary>
 
 - 🧬 522 個のクロスセクショナル alpha、オペレーター層でルックアヘッドを禁止
 - 📈 IC + IR + alive/reversed/dead 分類を 1 つの CLI コマンドで

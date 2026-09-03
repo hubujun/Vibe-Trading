@@ -583,7 +583,7 @@ LONGBRIDGE_ACCESS_TOKEN=...
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>522 ألفا كمّي جاهز عبر 7 families</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>562 ألفا كمّي جاهز عبر 7 families</sub></summary>
 
 - 🧬 522 ألفا cross-sectional، مع منع lookahead على طبقة العوامل (operators)
 - 📈 IC + IR + تصنيف alive/reversed/dead بأمر CLI واحد

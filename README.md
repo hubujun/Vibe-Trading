@@ -615,7 +615,7 @@ alongside the bundled roster (same-name files override it, like user skills) and
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>522 pre-built quant alphas across 7 families</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>562 pre-built quant alphas across 7 families</sub></summary>
 
 - 🧬 522 cross-sectional alphas, lookahead-banned at the operator layer
 - 📈 IC + IR + alive/reversed/dead categorisation in one CLI command

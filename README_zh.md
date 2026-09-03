@@ -669,7 +669,7 @@ LONGBRIDGE_ACCESS_TOKEN=...
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>522 个预置 alpha，覆盖 7 个家族</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>562 个预置 alpha，覆盖 7 个家族</sub></summary>
 
 - 🧬 522 个横截面 alpha，算子层即禁用 lookahead
 - 📈 一条 CLI 命令完成 IC + IR + alive/reversed/dead 分类
