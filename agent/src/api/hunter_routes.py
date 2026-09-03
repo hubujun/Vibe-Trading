@@ -24,6 +24,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 _HUNTER_PATH = Path.home() / ".vibe-trading" / "hunter_state.json"
+_PAPER_RESULTS_PATH = Path.home() / ".vibe-trading" / "hunter" / "paper_results.json"
 
 #: 机会类型 (与前端 KIND_LABEL 一一对应).
 OPPORTUNITY_KINDS = {
@@ -150,6 +151,17 @@ def register_hunter_routes(
     def hunter_summary() -> dict[str, Any]:
         """事件猎手全量: 候选机会 + 开仓账本. 只读, 无写副作用."""
         return _load()
+
+    @app.get(
+        "/api/hunter/paper",
+        dependencies=[Depends(require_auth)],
+    )
+    def hunter_paper() -> dict[str, Any]:
+        """玩法体检: 回测/模拟盘汇总 (listing 上新首日 + squeeze 深负费率). 只读."""
+        try:
+            return json.loads(_PAPER_RESULTS_PATH.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
 
     # ---- 候选机会 ----
 
