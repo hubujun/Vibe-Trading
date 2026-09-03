@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Crosshair,
+  FlaskConical,
   Flame,
   Pencil,
   Plus,
@@ -10,7 +11,7 @@ import {
   Target,
   Trash2,
 } from "lucide-react";
-import { api, HunterOpportunity, HunterResponse, HunterShot } from "../lib/api";
+import { api, HunterOpportunity, HunterPaperResponse, HunterResponse, HunterShot } from "../lib/api";
 import { cn } from "../lib/utils";
 
 /** 术语提示: ? 圆圈 + hover 白话解释 (与工作台 Term 同款, 独立页面内嵌) */
@@ -111,6 +112,7 @@ const EMPTY_OPP: OppFormState = {
 
 export function Hunter() {
   const [data, setData] = useState<HunterResponse | null>(null);
+  const [paper, setPaper] = useState<HunterPaperResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -144,8 +146,20 @@ export function Hunter() {
     }
   };
 
+  // 玩法体检数据派生 (100x 档用于结论文案)
+  const listingPaper = paper?.listing ?? null;
+  const lv100 = listingPaper?.levs.find((l) => l.lev === 100) ?? null;
+  const slRate100 =
+    lv100 && lv100.n > 0 ? Math.round((lv100.sl / lv100.n) * 100) : null;
+  const ev100 =
+    lv100 != null ? `${lv100.ev >= 0 ? "+" : ""}${lv100.ev}U/注` : "--";
+
   useEffect(() => {
     load();
+    api
+      .getHunterPaper()
+      .then((p) => setPaper(p))
+      .catch(() => setPaper(null));
   }, []);
 
   const opps = data?.opportunities ?? [];
@@ -845,9 +859,184 @@ export function Hunter() {
             </div>
           </section>
 
+          {/* ============ 玩法体检 ============ */}
+          <section className="rounded-xl border bg-card">
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <FlaskConical className="h-4 w-4 text-cyan-500" />
+                玩法体检
+                <span className="text-xs font-normal text-muted-foreground">
+                  历史数据压力测试这个玩法 · 结论比信号重要
+                </span>
+              </h2>
+              {(() => {
+                const t = paper?.listing?.generated_at ?? paper?.squeeze?.generated_at;
+                return t ? (
+                  <span className="text-[11px] text-muted-foreground">生成于 {t}</span>
+                ) : null;
+              })()}
+            </div>
+
+            {!paper?.listing && !paper?.squeeze ? (
+              <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+                体检数据未生成 — 跑 <span className="font-mono">python3 ~/.hermes/scripts/hunter_paper.py</span>{" "}
+                与 <span className="font-mono">hunter_paper_squeeze.py</span> 后刷新
+              </p>
+            ) : (
+              <div className="space-y-3 p-3">
+                {/* ---- listing 上新首日 ---- */}
+                {paper?.listing && (
+                  <div className="rounded-lg border bg-background p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-[13px] font-semibold">上新首日 · 100x 彩票仓杠杆对照</h3>
+                      <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-500">
+                        {paper.listing.lookback_days} 天 · {paper.listing.samples} 新币 ·{" "}
+                        {paper.listing.signal_coins} 信号
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      首日第一根 |5m实体|≥3% 脉冲 = 揭晓确认 → 同向进 · 面值 100U · 每币一注 ·
+                      同一"翻倍或归零"结构下只改杠杆
+                    </p>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                            <th className="px-2 py-2 font-medium">杠杆</th>
+                            <th className="px-2 py-2 font-medium text-right">止盈(翻倍价动)</th>
+                            <th className="px-2 py-2 font-medium text-right">爆仓距离</th>
+                            <th className="px-2 py-2 font-medium text-right">注数</th>
+                            <th className="px-2 py-2 font-medium text-right">翻倍</th>
+                            <th className="px-2 py-2 font-medium text-right">爆仓</th>
+                            <th className="px-2 py-2 font-medium text-right">时间出</th>
+                            <th className="px-2 py-2 font-medium text-right">胜率</th>
+                            <th className="px-2 py-2 font-medium text-right">期望 U/注</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...paper.listing.levs]
+                            .sort((a, b) => b.lev - a.lev)
+                            .map((lv) => (
+                              <tr key={lv.lev} className="border-b border-border/40 last:border-0">
+                                <td className="px-2 py-1.5 font-mono">
+                                  {lv.lev}x
+                                  {lv.lev === 100 && (
+                                    <span className="ml-1.5 rounded bg-rose-500/10 px-1 py-0.5 text-[10px] text-rose-500">
+                                      玩法默认
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono">+{lv.tp_pct}%</td>
+                                <td className="px-2 py-1.5 text-right font-mono">-{lv.sl_pct}%</td>
+                                <td className="px-2 py-1.5 text-right font-mono">{lv.n}</td>
+                                <td className="px-2 py-1.5 text-right font-mono text-emerald-500">{lv.tp}</td>
+                                <td className="px-2 py-1.5 text-right font-mono text-rose-500">{lv.sl}</td>
+                                <td className="px-2 py-1.5 text-right font-mono">{lv.timeout}</td>
+                                <td className="px-2 py-1.5 text-right font-mono">{lv.win_rate}%</td>
+                                <td
+                                  className={cn(
+                                    "px-2 py-1.5 text-right font-mono",
+                                    lv.ev >= 0 ? "text-emerald-500" : "text-rose-500"
+                                  )}
+                                >
+                                  {lv.ev >= 0 ? "+" : ""}
+                                  {lv.ev}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-2 rounded-md bg-rose-500/5 px-2.5 py-1.5 text-[11px] leading-relaxed text-rose-500/90">
+                      结论：方向正确率仅 {listingPaper?.dir_correct_pct ?? "--"}%（≈抛硬币）——首日脉冲本身没有 edge；
+                      100x 下 {lv100?.n ?? 0} 注里 {slRate100 ?? "—"}% 死在 {lv100?.sl_pct ?? "0.6"}% 插针，
+                      期望 {ev100}。同结构降到 10x 期望才 ≈0。要玩：降杠杆 + 等机制性方向（脱锚/解锁/投票），别赌首日脉冲。
+                    </p>
+                  </div>
+                )}
+
+                {/* ---- squeeze 深负费率 ---- */}
+                {paper?.squeeze && (
+                  <div className="rounded-lg border bg-background p-3">
+                    <h3 className="text-[13px] font-semibold">
+                      深负费率 · "轧空候选"方向检验
+                      <span className="ml-2 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-500">
+                        {paper.squeeze.events} 事件 × {paper.squeeze.coins} 币
+                      </span>
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      8h 费率 ≤ {paper.squeeze.threshold_pct}% 结算后做多收益 vs 同期全样本基准——
+                      深负到底是不是"轧空蓄势"？
+                    </p>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                            <th className="px-2 py-2 font-medium">持有</th>
+                            <th className="px-2 py-2 font-medium text-right">胜率 (收益&gt;0)</th>
+                            <th className="px-2 py-2 font-medium text-right">平均收益</th>
+                            <th className="px-2 py-2 font-medium text-right">中位收益</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {["T+1", "T+2", "T+3"].map((h) => {
+                            const hh = paper.squeeze?.horizons?.[h];
+                            if (!hh) return null;
+                            return (
+                              <tr key={h} className="border-b border-border/40 last:border-0">
+                                <td className="px-2 py-1.5 font-mono">{h}</td>
+                                <td className="px-2 py-1.5 text-right font-mono">{hh.win_rate}%</td>
+                                <td
+                                  className={cn(
+                                    "px-2 py-1.5 text-right font-mono",
+                                    hh.avg_pct >= 0 ? "text-emerald-500" : "text-rose-500"
+                                  )}
+                                >
+                                  {hh.avg_pct >= 0 ? "+" : ""}
+                                  {hh.avg_pct}%
+                                </td>
+                                <td className="px-2 py-1.5 text-right font-mono">
+                                  {hh.median_pct >= 0 ? "+" : ""}
+                                  {hh.median_pct}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {paper.squeeze.base_win_rate != null && (
+                            <tr className="bg-muted/20">
+                              <td className="px-2 py-1.5 font-mono text-muted-foreground">
+                                基准(随机日做多)
+                              </td>
+                              <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                                {paper.squeeze.base_win_rate}%
+                              </td>
+                              <td className="px-2 py-1.5 text-right text-muted-foreground" colSpan={2}>
+                                {paper.squeeze.base_windows ?? "--"} 个日窗口
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-2 rounded-md bg-amber-500/5 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-600/90">
+                      结论：深负费率不是"轧空蓄势"，是下跌动量延续——事件后做多胜率 40% 低于基准 49%，
+                      越深负越跌。触发器的"轧空候选"应理解为"空头趋势观察"，追多危险；
+                      真要等点火，必须等动量衰竭 + 放量反包确认，费率负本身不是进场理由。
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-muted-foreground">
+                  重跑：<span className="font-mono">python3 ~/.hermes/scripts/hunter_paper.py</span>（上新首日，秒级，行情缓存）·
+                  <span className="font-mono">python3 ~/.hermes/scripts/hunter_paper_squeeze.py</span>（深负费率，约 1 分钟）
+                </p>
+              </div>
+            )}
+          </section>
+
           <p className="text-[11px] text-muted-foreground">
             数据本地存储于 ~/.vibe-trading/hunter_state.json · 与 Vibe 体系隔离 ·
-            触发器/自动监控可按 trump_watch.py 模式另行接入 cron
+            触发器 cron hunter-scout 每 8h 自动扫描新合约与费率异动
           </p>
         </>
       )}

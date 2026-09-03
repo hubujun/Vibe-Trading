@@ -593,6 +593,8 @@ export const api = {
     }),
   deleteHunterShot: (id: string) =>
     request<{ ok: boolean }>(`/api/hunter/shots/${id}`, { method: "DELETE" }),
+  getHunterPaper: (signal?: AbortSignal) =>
+    request<HunterPaperResponse>("/api/hunter/paper", { signal, cache: "no-store" }),
   transitionStrategy: (strategyId: string, action: string, note?: string) =>
     request<WorkbenchStrategy>(`/api/workbench/strategies/${strategyId}/transition`, {
       method: "POST",
@@ -1974,6 +1976,48 @@ export interface HunterShot {
 export interface HunterResponse {
   opportunities: HunterOpportunity[];
   shots: HunterShot[];
+}
+
+/** 玩法体检: 上新首日杠杆对照 (hunter_paper.py). */
+export interface HunterPaperLev {
+  lev: number;
+  tp_pct: number;
+  sl_pct: number;
+  n: number;
+  n_long: number;
+  n_short: number;
+  tp: number;
+  sl: number;
+  timeout: number;
+  pnl: number;
+  win_rate: number;
+  ev: number;
+  dir_correct_pct: number;
+}
+export interface HunterPaperListing {
+  generated_at: string;
+  lookback_days: number;
+  samples: number;
+  signal_coins: number;
+  pulse_pct: number;
+  margin_u: number;
+  dir_correct_pct: number | null;
+  levs: HunterPaperLev[];
+}
+/** 玩法体检: 深负费率方向回测 (hunter_paper_squeeze.py). */
+export interface HunterPaperSqueeze {
+  generated_at: string;
+  window_days: number;
+  threshold_pct: number;
+  events: number;
+  coins: number;
+  horizons: Record<string, { win_rate: number; avg_pct: number; median_pct: number }>;
+  base_win_rate: number | null;
+  base_windows: number | null;
+}
+export interface HunterPaperResponse {
+  listing?: HunterPaperListing | null;
+  squeeze?: HunterPaperSqueeze | null;
 }
 
 /** 因子体检: 全因子 IC/IC_IR/分层收益 + 模拟盘净值对照. */
