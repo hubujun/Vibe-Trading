@@ -146,8 +146,8 @@ test.describe("策略流水线栏目 E2E", () => {
       expect(seen.has(quad), `指标重复 (事故回归): ${label} → ${quad}`).toBe(false);
       seen.add(quad);
     }
-    // 至少 10 条僵尸 (基线 10, 容差 >=8), 至少 10 条有效
-    expect(ghostCount).toBeGreaterThanOrEqual(8);
+    // 至少 4 条僵尸 (2026-09-04 清污染后 4 条 paused 无独立回测数据, 容差 >=3), 至少 10 条有效
+    expect(ghostCount).toBeGreaterThanOrEqual(3);
     expect(seen.size).toBeGreaterThanOrEqual(10);
   });
 
