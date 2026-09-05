@@ -345,26 +345,42 @@ def backtest_variant(
     close = panel["close"]
     rets = close.pct_change()
 
-    # 因子得分合成 (缺失因子 → 该因子权重摊到其他因子)
-    mods = {fid: load_factor_module(fid) for fid in factors}
-    valid = {fid: m for fid, m in mods.items() if m is not None}
-    if not valid:
-        return {"error": "no valid factors"}
+    # 因子得分合成 — 任何因子加载失败(文件缺失)即拒绝回测, 不许静默摊权:
+    # 摊权让三因子变体退化成基座组合, 产出与基策略逐位相同的假指标
+    # (2026-09-05: 4 条 monitoring 僵尸引用 8-23 前丢失的因子文件, 摊权后
+    #  与基策略同 quad → E2E 30.13% 事故回归误报; 缺失=永久, 必须 fail loud)
+    raw_mods = {fid: load_factor_module(fid) for fid in factors}
+    missing = [fid for fid, m in raw_mods.items() if m is None]
+    if missing:
+        logger.warning(
+            "variant backtest: refuse to backtest %s — factor files missing: %s",
+            factors, missing,
+        )
+        return {"error": f"missing factor files: {missing}"}
+    mods: dict[str, Any] = {fid: m for fid, m in raw_mods.items() if m is not None}
     score_sum = None
     weight_sum = 0.0
-    for fid, mod in valid.items():
+    compute_failed: list[str] = []
+    for fid, mod in mods.items():
         try:
             f = mod.compute(panel).reindex(close.index)
             # 学术因子 compute 已返回横截面 z-score; zoo 因子 raw → 行 z-score 统一
             if fid not in ACADEMIC_MODULES:
                 f = _row_zscore(f)
         except Exception:  # noqa: BLE001
+            compute_failed.append(fid)
             continue
         w = float(weights.get(fid, 0.0))
         if w <= 0:
             continue
         score_sum = f * w if score_sum is None else score_sum + f * w
         weight_sum += w
+    if compute_failed:
+        logger.warning(
+            "variant backtest: refuse to backtest %s — factor compute failed: %s",
+            factors, compute_failed,
+        )
+        return {"error": f"factor compute failed: {compute_failed}"}
     if score_sum is None or weight_sum <= 0:
         return {"error": "no usable factors"}
     combo = score_sum / weight_sum
