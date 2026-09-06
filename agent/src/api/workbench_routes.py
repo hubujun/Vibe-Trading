@@ -539,7 +539,16 @@ def register_workbench_routes(
                     )
                     # 第三圈: 参数自适应 — 应用到该策略自身 (内存中, 不落盘)
                     applied = _apply_adaptations(r, [s], persist=False)
-                    r.adaptations.extend(applied["adaptations"])
+                    # _apply_adaptations 返回 dict 列表, r.adaptations 是 ReviewAdaptation
+                    # dataclass 列表 — 直接 extend 会把 dict 混入, to_dict() 崩
+                    # ('dict' object has no attribute 'to_dict') → review 静默变 {},
+                    # 整条策略复盘丢失 (2026-09-06 自愈值班发现, 日志累计 60 次间歇崩溃)。
+                    # 边界转成 dataclass 保持类型纯净。
+                    from src.strategy.review_engine import ReviewAdaptation
+
+                    r.adaptations.extend(
+                        ReviewAdaptation(**a) for a in applied["adaptations"]
+                    )
                     review_dict = r.to_dict()
                     # 假设流转记录只在基策略上收 (幂等, 避免重复)
                     if not global_hypothesis_updates:
