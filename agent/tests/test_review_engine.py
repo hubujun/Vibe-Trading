@@ -333,3 +333,37 @@ class TestAdaptations:
         review = compute_review(state, metrics)
 
         assert review.loop_next == "compose"
+
+
+class TestReviewAdaptationsSerialization:
+    """2026-09-06 回归: workbench GET 第三圈 extend dict 进 dataclass 列表导致 to_dict 崩.
+
+    现象: _apply_adaptations 返回 dict 列表, 直接 r.adaptations.extend(...) 混入后
+    StrategyReview.to_dict() 抛 'dict' object has no attribute 'to_dict' →
+    review 静默变 {}, 整条策略复盘丢失 (日志累计 60 次间歇崩溃)。
+    修复: ① routes 边界 ReviewAdaptation(**dict) 转 dataclass; ② to_dict 容错 dict 条目。
+    """
+
+    def test_to_dict_tolerates_dict_entries(self) -> None:
+        from src.strategy.review_engine import ReviewAdaptation
+
+        r = StrategyReview(adaptations=[ReviewAdaptation(param="exposure_multiplier", from_value=1.0, to_value=0.5, reason="dd breach")])
+        # 模拟旧 bug: dict 混入 dataclass 列表
+        r.adaptations.append({"param": "exposure_multiplier", "from_value": 1.0, "to_value": 0.5, "reason": "x", "at": "2026-09-06T00:00:00+00:00"})
+        d = r.to_dict()  # 不应抛异常
+        assert len(d["adaptations"]) == 2
+        assert d["adaptations"][0]["param"] == "exposure_multiplier"
+        assert d["adaptations"][1]["to_value"] == 0.5  # dict 条目原样透传
+
+    def test_route_boundary_dict_to_dataclass_roundtrip(self) -> None:
+        from src.strategy.review_engine import ReviewAdaptation
+
+        raw = {"param": "exposure_multiplier", "from_value": 1.0, "to_value": 0.25, "reason": "consecutive losses"}
+        a = ReviewAdaptation(**raw)  # routes 边界转换 (at 有默认值, 缺省合法)
+        assert a.param == "exposure_multiplier"
+        assert a.to_value == 0.25
+        assert a.at  # 默认填充
+        # dataclass 列表全为对象时 to_dict 序列化正常
+        r = StrategyReview(adaptations=[a])
+        d = r.to_dict()
+        assert d["adaptations"][0] == {**raw, "at": a.at}

@@ -172,7 +172,8 @@ class StrategyReview:
             "signal_health": self.signal_health.to_dict(),
             "data_freshness": self.data_freshness.to_dict(),
             "hypothesis_updates": [u.to_dict() for u in self.hypothesis_updates],
-            "adaptations": [a.to_dict() for a in self.adaptations],
+            # 容错: adaptations 里若混入 dict (老格式/边界转换遗漏) 不拖垮整条 review
+            "adaptations": [a.to_dict() if hasattr(a, "to_dict") else a for a in self.adaptations],
             "variants": list(self.variants),
             "variant_metrics": dict(self.variant_metrics),
             "recommendations": [r.to_dict() for r in self.recommendations],
