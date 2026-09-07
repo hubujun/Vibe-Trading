@@ -119,19 +119,33 @@ def _validate_code(code: str) -> tuple[bool, str]:
 
 
 def _inject_base_import(code: str) -> str:
-    """强制注入完整的 src.factors.base 工具导入 — LLM 常漏 import (如只用不导).
+    """强制注入完整 import — LLM 常漏 (pd/np/base 工具 只用不导).
 
-    替换生成代码中所有 base import 行为完整工具列表, 保证 compute 可独立加载.
+    替换生成代码中所有 base import 行为完整工具列表, 保证 compute 可独立加载;
+    代码用到 pd./np. 但没 import 时自动补 (2026-09-06: llm_cde5b21b/llm_49eea3e6
+    连续 2 个因子因 NameError: name 'pd' 冒烟失败, 根因 = 生成代码漏 import pandas).
     """
+    lines = code.splitlines()
+    # 缺 pandas/numpy import 且代码确实用到 -> 补 (注入行都在 ALLOWED_IMPORTS 白名单)
+    has_pd_import = any(l.strip().startswith(("import pandas", "from pandas")) for l in lines)
+    has_np_import = any(l.strip().startswith(("import numpy", "from numpy")) for l in lines)
+    uses_pd = "pd." in code or "pd.DataFrame" in code
+    uses_np = "np." in code
+    head: list[str] = []
+    if uses_pd and not has_pd_import:
+        head.append("import pandas as pd")
+    if uses_np and not has_np_import:
+        head.append("import numpy as np")
     tools = ("rank, zscore, ts_rank, ts_corr, ts_cov, ts_mean, ts_std, ts_max, "
              "ts_min, ts_argmax, ts_argmin, delta, decay_linear, safe_div, "
              "signed_power, scale, vwap")
-    lines = [l for l in code.splitlines()
+    lines = [l for l in lines
              if not l.strip().startswith("from src.factors.base import")]
     future = [l for l in lines if l.strip().startswith("from __future__")]
     rest = [l for l in lines if not l.strip().startswith("from __future__")]
-    return "\n".join(future + [f"# auto-injected imports (factor_miner)",
-                               f"from src.factors.base import {tools}", ""] + rest)
+    injected = head + [f"# auto-injected imports (factor_miner)",
+                       f"from src.factors.base import {tools}"]
+    return "\n".join(future + injected + [""] + rest)
 
 
 def _write_zoo(code: str, nickname: str) -> Path:
