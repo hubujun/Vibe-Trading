@@ -42,8 +42,16 @@ jobs:
                  agent/tests/test_graduation_review.py \
                  agent/tests/test_hypothesis_registry.py -q
 
+      # cron 入口 import 冒烟 — 这些脚本没有任何单测覆盖, 出问题只会在次日
+      # 定点 cron 静默炸掉 (例: 毕业评审 --apply 的 AttributeError 潜伏到 20 笔
+      # 样本达标才暴露)。import 级检查最便宜地守住这一类。
+      - name: cron 入口 import 冒烟
+        run: |
+          cd agent
+          python -c "import importlib; [importlib.import_module(m) for m in ('review_daily','daily_signal','src.strategy.graduation_review','src.strategy.variant_backtester','src.strategy.portfolio_optimizer','src.strategy.review_engine')]; print('cron 入口 import 全部通过')"
+
   frontend-build:
-    name: 前端构建 (build)
+    name: 前端构建 + 单测
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -53,8 +61,11 @@ jobs:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: 安装 + 构建
+      # 之前只 build 不跑测试 —— frontend/src/**/__tests__ 下 66 个文件 634 条
+      # 用例从未进过 CI (2026-09-10 补上)
+      - name: 安装 + 单测 + 构建
         run: |
           cd frontend
           npm ci
+          npm run test:run
           npm run build
