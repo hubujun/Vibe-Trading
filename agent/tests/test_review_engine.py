@@ -1,7 +1,8 @@
 """Tests for the strategy review engine (Loop Engineering 闭环第一圈).
 
 Covers: vs-backtest health, signal/data freshness, hypothesis auto
-transitions (testing→validated / testing→rejected / validated→monitoring),
+transitions (testing→monitoring on losing streak / testing|monitoring→validated /
+validated→monitoring on dd-breach / rejected→monitoring recovery),
 recommendation levels, and fail-open behaviour.
 """
 
@@ -15,6 +16,7 @@ from src.strategy.review_engine import (
     MIN_TRADES,
     StrategyReview,
     compute_review,
+    _apply_hypothesis_rule,
     _consecutive_losses,
     _reconstruct_nav,
 )
@@ -141,7 +143,8 @@ class TestHypothesisTransitions:
         assert review.hypothesis_updates[0].to_status == "validated"
         assert "跑赢" in review.hypothesis_updates[0].reason
 
-    def test_testing_three_losses_becomes_rejected(self, tmp_path: Path) -> None:
+    def test_testing_three_losses_becomes_monitoring(self, tmp_path: Path) -> None:
+        """2026-09-10 改口径: 连亏 3 笔只降级观察, 不再永久否决."""
         hypo_path = tmp_path / "hypotheses.json"
         _write_hypotheses(hypo_path, {"hyp_2": "testing"})
         state = tmp_path / "state.json"
@@ -153,8 +156,10 @@ class TestHypothesisTransitions:
 
         review = compute_review(state, metrics, hypo_path)
 
-        assert _read_hypotheses(hypo_path)["hyp_2"] == "rejected"
+        assert _read_hypotheses(hypo_path)["hyp_2"] == "monitoring"
+        assert review.hypothesis_updates[0].to_status == "monitoring"
         assert "连续 3 笔亏损" in review.hypothesis_updates[0].reason
+        assert "未否决" in review.hypothesis_updates[0].reason
 
     def test_validated_dd_breach_downgraded_to_monitoring(self, tmp_path: Path) -> None:
         hypo_path = tmp_path / "hypotheses.json"
@@ -198,6 +203,131 @@ class TestHypothesisTransitions:
         compute_review(state, metrics, hypo_path)
 
         assert _read_hypotheses(hypo_path)["hyp_5"] == "exploring"
+
+
+class TestHypothesisRuleBranches:
+    """_apply_hypothesis_rule 各分支 (2026-09-10 口径调整 + 恢复路径)."""
+
+    @staticmethod
+    def _hyp(status: str):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(hypothesis_id="hyp_x", title="假设 X", status=status)
+
+    @staticmethod
+    def _vs(**kwargs):
+        from src.strategy.review_engine import ReviewVsBacktest
+
+        return ReviewVsBacktest(**kwargs)
+
+    def test_streak_downgrades_to_monitoring_not_rejected(self) -> None:
+        upd = _apply_hypothesis_rule(self._hyp("testing"), _losing_trades(3), self._vs())
+        assert upd is not None
+        assert upd.to_status == "monitoring"
+        assert upd.from_status == "testing"
+
+    def test_rejected_recovers_when_sample_insufficient(self) -> None:
+        """rejected 且自己的策略样本 < 门槛 → 回 monitoring (撤销证据不足的否决)."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("rejected"), _losing_trades(10), self._vs(), has_own_state=True
+        )
+        assert upd is not None
+        assert upd.to_status == "monitoring"
+        assert "不足以下否决结论" in upd.reason
+
+    def test_rejected_kept_when_sample_sufficient(self) -> None:
+        """满样本的否决保留 — 终局判决交给毕业评审, 规则不自动翻案."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("rejected"), _losing_trades(MIN_TRADES), self._vs(), has_own_state=True
+        )
+        assert upd is None
+
+    def test_rejected_kept_without_own_strategy(self) -> None:
+        """未进模拟盘的假设不被自动恢复 (has_own_state=False)."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("rejected"), _losing_trades(3), self._vs(), has_own_state=False
+        )
+        assert upd is None
+
+    def test_monitoring_outperform_becomes_validated(self) -> None:
+        upd = _apply_hypothesis_rule(
+            self._hyp("monitoring"),
+            _winning_trades(MIN_TRADES),
+            self._vs(
+                sample_sufficient=True,
+                outperforming=True,
+                paper_trades=MIN_TRADES,
+                paper_annual=20.0,
+                backtest_annual=12.0,
+            ),
+        )
+        assert upd is not None
+        assert upd.to_status == "validated"
+
+    def test_monitoring_streak_stays_monitoring(self) -> None:
+        """monitoring 再连亏不流转 (幂等, 不会累积成否决)."""
+        upd = _apply_hypothesis_rule(self._hyp("monitoring"), _losing_trades(5), self._vs())
+        assert upd is None
+
+
+class TestStrategyLookupBySignalDefinition:
+    """_strategy_for_sd — 策略 ↔ 假设关联键 = signal_definition (跨策略串扰防线)."""
+
+    @staticmethod
+    def _write_workbench(home: Path, records: list[dict]) -> None:
+        wb = home / ".vibe-trading" / "workbench"
+        wb.mkdir(parents=True, exist_ok=True)
+        (wb / "strategies.json").write_text(
+            json.dumps({"strategies": records}), encoding="utf-8"
+        )
+
+    def test_returns_matching_record_and_state(self, tmp_path: Path, monkeypatch) -> None:
+        from src.strategy.review_engine import _strategy_for_sd, _strategy_state_for_sd
+
+        run_dir = tmp_path / "runs" / "paper_s1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "state.json").write_text(
+            json.dumps({"nav": 1.02, "trades": [{"ret": 0.1}]}), encoding="utf-8"
+        )
+        self._write_workbench(
+            tmp_path,
+            [
+                {"strategy_id": "combo_a", "signal_definition": "sd_a", "phase": "paper",
+                 "run_dir": str(run_dir)},
+                {"strategy_id": "combo_b", "signal_definition": "sd_b", "phase": "paused",
+                 "run_dir": str(tmp_path / "nope")},
+            ],
+        )
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        rec, state = _strategy_for_sd("sd_a")
+        assert rec is not None and rec["strategy_id"] == "combo_a"
+        assert state is not None and state["nav"] == 1.02
+        only_state = _strategy_state_for_sd("sd_a")
+        assert only_state is not None and only_state["nav"] == 1.02
+
+    def test_unknown_signal_definition_returns_none(self, tmp_path: Path, monkeypatch) -> None:
+        from src.strategy.review_engine import _strategy_for_sd
+
+        self._write_workbench(tmp_path, [{"strategy_id": "combo_a", "signal_definition": "sd_a"}])
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        assert _strategy_for_sd("sd_zzz") == (None, None)
+        assert _strategy_for_sd("") == (None, None)
+
+    def test_list_format_workbench_tolerated(self, tmp_path: Path, monkeypatch) -> None:
+        """strategies.json 顶层是 list 时也要能查 (只认 dict 是历史脆弱点)."""
+        from src.strategy.review_engine import _strategy_for_sd
+
+        wb = tmp_path / ".vibe-trading" / "workbench"
+        wb.mkdir(parents=True)
+        (wb / "strategies.json").write_text(
+            json.dumps([{"strategy_id": "combo_a", "signal_definition": "sd_a"}]), encoding="utf-8"
+        )
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+        rec, _ = _strategy_for_sd("sd_a")
+        assert rec is not None and rec["strategy_id"] == "combo_a"
 
 
 class TestFreshnessAndFailOpen:

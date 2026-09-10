@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -140,6 +141,55 @@ def _grade_testing(attribs: list[dict]) -> dict:
     return {"n": n, "cum": cum, "grade": "rejected (建议淘汰)"}
 
 
+def _apply_promotion(
+    strategy: dict,
+    grade: dict,
+    hypo_path: Path | None = None,
+) -> int:
+    """把该策略对应的 testing 假设晋升为 validated, 返回改动条数.
+
+    策略 ↔ 假设的匹配口径 = ``signal_definition`` (两者共享的稳定关联键)。
+
+    2026-09-10 修复 (原实现有两处连环 bug, 导致 --apply 实际晋升 0 条):
+    1. ``hypotheses.json`` 顶层是 JSON **列表**, 旧代码 ``hyps.get("hypotheses", [])``
+       在 list 上直接抛 ``AttributeError: 'list' object has no attribute 'get'``;
+    2. 旧代码用 ``h.get("seeded_strategy_id")`` 匹配, 但注册表 schema
+       (:class:`src.hypotheses.registry.Hypothesis`) 根本没有该字段 ——
+       136 条假设里 0 条有, 即使不崩也永远匹配不到。
+    走 :class:`HypothesisRegistry` 读写, 兼容 list/dict 两种存储 + 原子写。
+
+    Args:
+        strategy: strategies.json 里的策略记录.
+        grade: ``_grade_testing`` 输出 (含 n / cum).
+        hypo_path: 假设库路径, 缺省 ``~/.vibe-trading/hypotheses.json``.
+
+    Returns:
+        实际晋升的假设条数 (0 = 无匹配).
+    """
+    from src.hypotheses.registry import HypothesisRegistry  # noqa: PLC0415
+
+    sd = str(strategy.get("signal_definition") or "")
+    if not sd:
+        return 0
+    registry = HypothesisRegistry(hypo_path or (RUNTIME_ROOT / "hypotheses.json"))
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    note = (
+        f"{stamp}: 毕业评审 — {grade.get('n')} 笔样本累计 {grade.get('cum', 0.0):+.2f}%, "
+        f"建议毕业, testing → validated"
+    )
+    changed = 0
+    for hyp in registry.list():
+        if hyp.status == "testing" and hyp.signal_definition == sd:
+            prev = str(hyp.invalidation_notes or "")
+            registry.update(
+                hyp.hypothesis_id,
+                status="validated",
+                invalidation_notes=f"{prev}\n{note}" if prev else note,
+            )
+            changed += 1
+    return changed
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="20 笔样本毕业评审")
     ap.add_argument("--apply", action="store_true", help="应用状态建议到 hypotheses.json")
@@ -200,15 +250,7 @@ def main() -> int:
 
         # 4. apply
         if args.apply and grade["grade"].startswith("validated"):
-            hyps = json.loads((RUNTIME_ROOT / "hypotheses.json").read_text(encoding="utf-8"))
-            changed = 0
-            for h in hyps.get("hypotheses", []):
-                if h.get("status") == "testing" and h.get("seeded_strategy_id") == sid:
-                    h["status"] = "validated"
-                    h["note"] = h.get("note", "") + " [毕业评审: 20笔样本达标, validated]"
-                    changed += 1
-            (RUNTIME_ROOT / "hypotheses.json").write_text(
-                json.dumps(hyps, ensure_ascii=False, indent=2), encoding="utf-8")
+            changed = _apply_promotion(strategy, grade)
             print(f"  --apply: 已更新 {changed} 条 testing → validated")
     return 0
 

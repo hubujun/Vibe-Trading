@@ -5,9 +5,13 @@
 - 体检: 模拟盘 vs 回测 (年化/回撤), 信号新鲜度, 回测数据新鲜度
 - 假设自动流转 (写回 hypotheses.json, 复用 HypothesisRegistry 保证
   状态词表校验 + 原子写):
-    - status == "testing" 且连亏 >= 3 笔 → rejected (与风控熔断一致)
-    - status == "testing" 且样本足 + 跑赢回测 → validated
+    - status == "testing" 且连亏 >= 3 笔 → monitoring (降杠杆观察, **不再否决**;
+      风控动作由 exposure_multiplier *= 0.5 落地, 状态只降级不判死)
+    - status == "testing"/"monitoring" 且样本足 + 跑赢回测 → validated
     - status == "validated" 且回撤超限 → 降级 monitoring (附原因)
+    - status == "rejected" 且对应策略样本 < MIN_TRADES → 回 monitoring
+      (撤销"样本不足"下作出的否决; 防止终态锁死。满样本的最终判决交给毕业评审
+      `src.strategy.graduation_review`, 由老胡按报告拍板)
 - 推荐动作: 规则生成的下一步建议, 驱动用户把策略推回研究阶段
 
 设计约束:
@@ -49,6 +53,8 @@ EXPOSURE_MIN = 0.25
 EXPOSURE_MAX = 1.0
 EXPOSURE_STEP = 0.5  # 降杠杆步长
 EXPOSURE_RECOVER_STEP = 0.1  # 恢复步长
+#: 视为"在跑"的策略阶段 — 只有这些阶段谈得上样本积累/翻案
+RUNNING_PHASES = ("paper", "live")
 
 
 def _utc_now() -> str:
@@ -302,14 +308,21 @@ def compute_review(
         try:
             registry = HypothesisRegistry(hypotheses_path)
             for hyp in registry.list():
-                # testing 假设用其对应策略的调仓判连亏 (避免跨策略串扰 —
-                # 传入的 trades 是当前被 review 策略的, 不是该假设的)
+                # 假设用自己的策略调仓判定 (避免跨策略串扰 — 传入的 trades 是
+                # 当前被 review 策略的, 不是该假设的)。
+                # testing: 判连亏; monitoring/rejected: 判样本是否够翻案/恢复。
                 hyp_trades = trades
-                if str(hyp.status) == "testing":
-                    st = _strategy_state_for_sd(str(hyp.signal_definition or ""))
+                has_own_state = False
+                if str(hyp.status) in ("testing", "monitoring", "rejected"):
+                    rec, st = _strategy_for_sd(str(hyp.signal_definition or ""))
                     if st is not None:
                         hyp_trades = st.get("trades") or []
-                update = _apply_hypothesis_rule(hyp, hyp_trades, vs)
+                        # 只有"在跑"的策略才谈得上样本不足翻案 (暂停/归档策略
+                        # 样本不再增长, 恢复观察没有意义)
+                        has_own_state = bool(rec) and rec.get("phase") in RUNNING_PHASES
+                update = _apply_hypothesis_rule(
+                    hyp, hyp_trades, vs, has_own_state=has_own_state
+                )
                 if update is not None:
                     _persist_hypothesis_update(registry, hyp, update, review)
         except Exception:  # noqa: BLE001 — 假设流转失败不拖垮体检
@@ -384,13 +397,29 @@ def _apply_hypothesis_rule(
     hyp: Any,
     trades: list[dict[str, Any]],
     vs: ReviewVsBacktest,
+    has_own_state: bool = False,
 ) -> ReviewHypothesisUpdate | None:
-    """对单条假设应用流转规则; 不匹配返回 None."""
+    """对单条假设应用流转规则; 不匹配返回 None.
+
+    Args:
+        hyp: 注册表假设记录.
+        trades: 该假设对应策略的调仓 (无对应策略时退化为调用方传入的 trades).
+        vs: 复盘对照结果 (样本是否充足 / 是否跑赢 / 回撤是否超限).
+        has_own_state: ``trades`` 是否来自该假设自己的模拟盘策略 ——
+            样本门槛类规则 (否决撤销) 只对自己在跑模拟盘的假设生效,
+            避免把"还没进模拟盘"的假设误判成"样本不足".
+
+    Returns:
+        需要落库的状态流转, 或 None (无匹配规则).
+    """
     status = str(hyp.status)
     title = str(hyp.title)
     hid = str(hyp.hypothesis_id)
 
-    # testing + 连亏 >= 3 → rejected
+    # testing + 连亏 >= 3 → monitoring (降杠杆观察, 不再直接否决)
+    # 2026-09-10 改口径: 市场中性策略 3 天小幅连亏 (合计可低至 -0.7%) 属随机波动,
+    # 直接 rejected 会让大量在跑策略被永久否决 (实测 28/37) 且没有恢复路径;
+    # 风控动作已由 exposure_multiplier *= 0.5 落地, 状态只需降级观察.
     if status == "testing" and trades:
         streak = _consecutive_losses(trades)
         if streak >= CONSECUTIVE_LOSSES:
@@ -398,11 +427,26 @@ def _apply_hypothesis_rule(
                 hypothesis_id=hid,
                 title=title,
                 from_status=status,
-                to_status="rejected",
-                reason=f"模拟盘连续 {streak} 笔亏损 (≥{CONSECUTIVE_LOSSES}), 触发风控规则",
+                to_status="monitoring",
+                reason=(
+                    f"模拟盘连续 {streak} 笔亏损 (≥{CONSECUTIVE_LOSSES}) → 降杠杆观察 "
+                    f"(未否决; 风控降杠杆已生效, 满 {MIN_TRADES} 笔再由毕业评审判决)"
+                ),
             )
-    # testing + 样本足 + 跑赢 → validated
-    if status == "testing" and vs.sample_sufficient and vs.outperforming is True:
+    # rejected + 样本不足 → monitoring (撤销证据不足下的否决, 防终态锁死)
+    if status == "rejected" and has_own_state and len(trades) < MIN_TRADES:
+        return ReviewHypothesisUpdate(
+            hypothesis_id=hid,
+            title=title,
+            from_status=status,
+            to_status="monitoring",
+            reason=(
+                f"仅 {len(trades)} 笔样本 (<{MIN_TRADES}) 不足以下否决结论 → "
+                f"回观察中重新积累样本 (策略仍在模拟盘运行)"
+            ),
+        )
+    # testing/monitoring + 样本足 + 跑赢 → validated
+    if status in ("testing", "monitoring") and vs.sample_sufficient and vs.outperforming is True:
         return ReviewHypothesisUpdate(
             hypothesis_id=hid,
             title=title,
@@ -422,22 +466,39 @@ def _apply_hypothesis_rule(
     return None
 
 
-def _strategy_state_for_sd(signal_definition: str) -> dict[str, Any] | None:
-    """按 signal_definition 找对应策略的模拟盘 state (避免假设流转跨策略串扰)."""
+def _strategy_for_sd(signal_definition: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """按 signal_definition 找对应策略记录与模拟盘 state.
+
+    策略 ↔ 假设的稳定关联键是 ``signal_definition``。
+
+    Args:
+        signal_definition: 假设的策略定义文本.
+
+    Returns:
+        ``(策略记录, state)``; 未匹配或无 state 时对应项为 None.
+    """
     if not signal_definition:
-        return None
+        return None, None
     try:
         wb_path = Path.home() / ".vibe-trading" / "workbench" / "strategies.json"
         raw = json.loads(wb_path.read_text(encoding="utf-8"))
-        for s in raw.get("strategies", []):
-            if s.get("signal_definition") == signal_definition:
-                run_dir = Path(s.get("run_dir") or "")
-                st_path = run_dir / "state.json"
-                if st_path.exists():
-                    return json.loads(st_path.read_text(encoding="utf-8"))
+        rows = raw.get("strategies", []) if isinstance(raw, dict) else raw
+        for s in rows:
+            if s.get("signal_definition") != signal_definition:
+                continue
+            st_path = Path(s.get("run_dir") or "") / "state.json"
+            state = None
+            if st_path.exists():
+                state = json.loads(st_path.read_text(encoding="utf-8"))
+            return s, state
     except (OSError, ValueError, TypeError):
         pass
-    return None
+    return None, None
+
+
+def _strategy_state_for_sd(signal_definition: str) -> dict[str, Any] | None:
+    """按 signal_definition 找对应策略的模拟盘 state (避免假设流转跨策略串扰)."""
+    return _strategy_for_sd(signal_definition)[1]
 
 
 def _persist_hypothesis_update(
