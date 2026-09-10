@@ -68,6 +68,63 @@ def _read_hypotheses(path: Path) -> dict[str, str]:
     return {h["hypothesis_id"]: h["status"] for h in json.loads(path.read_text(encoding="utf-8"))}
 
 
+def _write_hypotheses_sd(path: Path, entries: list[tuple[str, str, str]]) -> None:
+    """写假设库, 带 signal_definition — entries = [(hid, status, signal_definition)]."""
+    records = [
+        {
+            "hypothesis_id": hid,
+            "title": f"假设 {hid}",
+            "thesis": "test",
+            "status": status,
+            "signal_definition": sd,
+            "invalidation_notes": "",
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }
+        for hid, status, sd in entries
+    ]
+    path.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
+
+
+def _setup_own_strategy(
+    tmp_path: Path,
+    monkeypatch,
+    sd: str,
+    *,
+    nav: float,
+    n: int,
+    phase: str = "paper",
+) -> None:
+    """给假设铺一条自己的模拟盘策略 (strategies.json + state.json), 并把 HOME 指到 tmp.
+
+    晋升/恢复规则都要求"假设自己的策略", 所以这些测试必须提供 strategies.json
+    (``_strategy_for_sd`` 读 ``Path.home()/.vibe-trading/workbench/strategies.json``)。
+    """
+    run_dir = tmp_path / "runs" / "paper_own"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"nav": nav, "trades": [{"ret": 0.5} for _ in range(n)]}), encoding="utf-8"
+    )
+    wb = tmp_path / ".vibe-trading" / "workbench"
+    wb.mkdir(parents=True, exist_ok=True)
+    (wb / "strategies.json").write_text(
+        json.dumps(
+            {
+                "strategies": [
+                    {
+                        "strategy_id": "combo_own",
+                        "signal_definition": sd,
+                        "phase": phase,
+                        "run_dir": str(run_dir),
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+
+
 def _winning_trades(n: int) -> list[dict]:
     return [{"from": f"2026-07-{i+1:02d}", "to": f"2026-07-{i+2:02d}", "ret": 0.5} for i in range(n)]
 
@@ -127,9 +184,14 @@ class TestVsBacktest:
 
 
 class TestHypothesisTransitions:
-    def test_testing_outperform_becomes_validated(self, tmp_path: Path) -> None:
+    def test_testing_outperform_becomes_validated(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """晋升要求假设自己的策略达标 (自身样本+净值), 不能跟着基策略一起晋升."""
+        sd = "sd_1"
         hypo_path = tmp_path / "hypotheses.json"
-        _write_hypotheses(hypo_path, {"hyp_1": "testing"})
+        _write_hypotheses_sd(hypo_path, [("hyp_1", "testing", sd)])
+        _setup_own_strategy(tmp_path, monkeypatch, sd, nav=1.5, n=MIN_TRADES)
         state = tmp_path / "state.json"
         state.write_text(
             json.dumps(_make_state(nav=1.5, trades=_winning_trades(MIN_TRADES))), encoding="utf-8"
@@ -142,6 +204,23 @@ class TestHypothesisTransitions:
         assert _read_hypotheses(hypo_path)["hyp_1"] == "validated"
         assert review.hypothesis_updates[0].to_status == "validated"
         assert "跑赢" in review.hypothesis_updates[0].reason
+
+    def test_no_own_strategy_never_promoted(self, tmp_path: Path, monkeypatch) -> None:
+        """回归: 定时任务里 vs 是基策略的对照 —— 没自己策略的假设不该被一起晋升."""
+        hypo_path = tmp_path / "hypotheses.json"
+        _write_hypotheses_sd(hypo_path, [("hyp_6", "testing", "sd_absent")])
+        _setup_own_strategy(tmp_path, monkeypatch, "sd_other", nav=1.5, n=MIN_TRADES)
+        state = tmp_path / "state.json"
+        state.write_text(
+            json.dumps(_make_state(nav=1.5, trades=_winning_trades(MIN_TRADES))), encoding="utf-8"
+        )
+        metrics = tmp_path / "backtest_metrics.json"
+        metrics.write_text(json.dumps(_make_metrics(annual=5.0)), encoding="utf-8")
+
+        review = compute_review(state, metrics, hypo_path)
+
+        assert _read_hypotheses(hypo_path)["hyp_6"] == "testing"
+        assert review.hypothesis_updates == []
 
     def test_testing_three_losses_becomes_monitoring(self, tmp_path: Path) -> None:
         """2026-09-10 改口径: 连亏 3 笔只降级观察, 不再永久否决."""
@@ -174,9 +253,11 @@ class TestHypothesisTransitions:
         assert _read_hypotheses(hypo_path)["hyp_3"] == "monitoring"
         assert review.hypothesis_updates[0].to_status == "monitoring"
 
-    def test_idempotent_no_double_transition(self, tmp_path: Path) -> None:
+    def test_idempotent_no_double_transition(self, tmp_path: Path, monkeypatch) -> None:
+        sd = "sd_4"
         hypo_path = tmp_path / "hypotheses.json"
-        _write_hypotheses(hypo_path, {"hyp_4": "testing"})
+        _write_hypotheses_sd(hypo_path, [("hyp_4", "testing", sd)])
+        _setup_own_strategy(tmp_path, monkeypatch, sd, nav=1.5, n=MIN_TRADES)
         state = tmp_path / "state.json"
         state.write_text(
             json.dumps(_make_state(nav=1.5, trades=_winning_trades(MIN_TRADES))), encoding="utf-8"
@@ -253,16 +334,46 @@ class TestHypothesisRuleBranches:
         upd = _apply_hypothesis_rule(
             self._hyp("monitoring"),
             _winning_trades(MIN_TRADES),
-            self._vs(
-                sample_sufficient=True,
-                outperforming=True,
-                paper_trades=MIN_TRADES,
-                paper_annual=20.0,
-                backtest_annual=12.0,
-            ),
+            self._vs(outperforming=True, backtest_annual=12.0),
+            has_own_state=True,
+            own_nav=1.08,
         )
         assert upd is not None
         assert upd.to_status == "validated"
+        assert "自身模拟盘" in upd.reason
+
+    def test_promotion_requires_own_samples(self) -> None:
+        """自身样本不足 → 不晋升 (不跟基策略的 vs.sample_sufficient 走)."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("testing"),
+            _winning_trades(MIN_TRADES - 1),
+            self._vs(sample_sufficient=True, outperforming=True, backtest_annual=12.0),
+            has_own_state=True,
+            own_nav=1.5,
+        )
+        assert upd is None
+
+    def test_promotion_requires_non_negative_own_nav(self) -> None:
+        """自身亏着的策略不晋升 (哪怕基策略跑赢回测)."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("testing"),
+            _winning_trades(MIN_TRADES),
+            self._vs(sample_sufficient=True, outperforming=True, backtest_annual=12.0),
+            has_own_state=True,
+            own_nav=0.99,
+        )
+        assert upd is None
+
+    def test_promotion_requires_own_strategy(self) -> None:
+        """没自己模拟盘策略的假设不晋升 (定时任务里 vs 是基策略的对照)."""
+        upd = _apply_hypothesis_rule(
+            self._hyp("testing"),
+            _winning_trades(MIN_TRADES),
+            self._vs(sample_sufficient=True, outperforming=True, backtest_annual=12.0),
+            has_own_state=False,
+            own_nav=None,
+        )
+        assert upd is None
 
     def test_monitoring_streak_stays_monitoring(self) -> None:
         """monitoring 再连亏不流转 (幂等, 不会累积成否决)."""

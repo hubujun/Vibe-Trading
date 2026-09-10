@@ -313,15 +313,17 @@ def compute_review(
                 # testing: 判连亏; monitoring/rejected: 判样本是否够翻案/恢复。
                 hyp_trades = trades
                 has_own_state = False
+                own_nav = None
                 if str(hyp.status) in ("testing", "monitoring", "rejected"):
                     rec, st = _strategy_for_sd(str(hyp.signal_definition or ""))
                     if st is not None:
                         hyp_trades = st.get("trades") or []
+                        own_nav = st.get("nav")
                         # 只有"在跑"的策略才谈得上样本不足翻案 (暂停/归档策略
                         # 样本不再增长, 恢复观察没有意义)
                         has_own_state = bool(rec) and rec.get("phase") in RUNNING_PHASES
                 update = _apply_hypothesis_rule(
-                    hyp, hyp_trades, vs, has_own_state=has_own_state
+                    hyp, hyp_trades, vs, has_own_state=has_own_state, own_nav=own_nav
                 )
                 if update is not None:
                     _persist_hypothesis_update(registry, hyp, update, review)
@@ -398,6 +400,7 @@ def _apply_hypothesis_rule(
     trades: list[dict[str, Any]],
     vs: ReviewVsBacktest,
     has_own_state: bool = False,
+    own_nav: float | None = None,
 ) -> ReviewHypothesisUpdate | None:
     """对单条假设应用流转规则; 不匹配返回 None.
 
@@ -406,8 +409,9 @@ def _apply_hypothesis_rule(
         trades: 该假设对应策略的调仓 (无对应策略时退化为调用方传入的 trades).
         vs: 复盘对照结果 (样本是否充足 / 是否跑赢 / 回撤是否超限).
         has_own_state: ``trades`` 是否来自该假设自己的模拟盘策略 ——
-            样本门槛类规则 (否决撤销) 只对自己在跑模拟盘的假设生效,
-            避免把"还没进模拟盘"的假设误判成"样本不足".
+            样本门槛类规则 (否决撤销 / 晋升) 只对自己在跑模拟盘的假设生效,
+            避免把"还没进模拟盘"的假设误判成"样本不足"或跟着基策略一起晋升.
+        own_nav: 该假设自己策略的模拟盘净值 (晋升条件之一).
 
     Returns:
         需要落库的状态流转, 或 None (无匹配规则).
@@ -445,14 +449,29 @@ def _apply_hypothesis_rule(
                 f"回观察中重新积累样本 (策略仍在模拟盘运行)"
             ),
         )
-    # testing/monitoring + 样本足 + 跑赢 → validated
-    if status in ("testing", "monitoring") and vs.sample_sufficient and vs.outperforming is True:
+    # testing/monitoring + 自己样本足 + 自己没亏 + 基策略跑赢 → validated
+    # 2026-09-10: 原规则只看 vs.sample_sufficient/vs.outperforming —— 但定时任务里
+    # vs 是**基策略**的对照 (review_daily 传 COMBO_STATE), 于是基策略一达标就
+    # 会把所有 testing 假设一起晋升 (和被 review 的策略毫无关系)。现在要求
+    # 假设自己的策略存在 + 自身样本 ≥ MIN_TRADES + 自身净值 > 1.0;
+    # 权威的逐策略判决仍在 graduation_review (walk-forward + 累计收益分级)。
+    if (
+        status in ("testing", "monitoring")
+        and has_own_state
+        and len(trades) >= MIN_TRADES
+        and isinstance(own_nav, (int, float))
+        and float(own_nav) > 1.0
+        and vs.outperforming is True
+    ):
         return ReviewHypothesisUpdate(
             hypothesis_id=hid,
             title=title,
             from_status=status,
             to_status="validated",
-            reason=f"模拟盘样本 {vs.paper_trades} 笔, 年化 {vs.paper_annual:.1%} 跑赢回测 {vs.backtest_annual:.1%}",
+            reason=(
+                f"自身模拟盘 {len(trades)} 笔样本净值 {float(own_nav):.4f} (>1.0) "
+                f"且基策略跑赢回测 (年化 {vs.backtest_annual:.1%}) → validated"
+            ),
         )
     # validated + 回撤超限 → monitoring
     if status == "validated" and vs.dd_breach:
