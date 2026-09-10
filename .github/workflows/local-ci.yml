@@ -3,6 +3,12 @@ name: Local CI (dev/local-work)
 # 本地专属 CI — 上游 test.yml 只监听 main, 我们的 dev/local-work 需要回归保障
 # 只跑确定性测试 (注入路径, 无网络/无本地数据依赖), 网络类测试留在本地跑
 # 注意: 上游同步 (10:00 cron) 不会删除此文件 (上游无同名文件, rebase 保留)
+#
+# 增补用例的门槛 (2026-09-10 明确): 必须满足两者, 否则 CI 会在 ubuntu runner 上红
+#   1. 零网络: 不 fetch OKX/yfinance, 不读 ~/.vibe-trading (tmp_path + monkeypatch)
+#   2. 零本机数据: `HOME=$(mktemp -d) pytest <file>` 仍全绿 (可本地先验)
+# 覆盖面 = 我们自有的 loop engineering 全链: 回测/变体生成/疯牛保险/放大事件/
+#          工作台/复盘/毕业评审/假设注册表/动态多空比
 
 on:
   push:
@@ -24,13 +30,17 @@ jobs:
           cache: pip
       - name: 安装依赖
         run: pip install -e ".[dev,openbb,stats]"
-      - name: 核心回归集 (回测/信号/事件/复盘/动态多空比)
+      - name: 核心回归集 (回测/变体生成/信号/事件/工作台/复盘/毕业评审/注册表)
         run: |
           pytest agent/tests/test_variant_backtester.py \
+                 agent/tests/test_variant_generator.py \
+                 agent/tests/test_dynamic_n.py \
+                 agent/tests/test_crazy_bull.py \
                  agent/tests/test_macro_events.py \
                  agent/tests/test_workbench_routes.py \
                  agent/tests/test_review_engine.py \
-                 agent/tests/test_dynamic_n.py -q
+                 agent/tests/test_graduation_review.py \
+                 agent/tests/test_hypothesis_registry.py -q
 
   frontend-build:
     name: 前端构建 (build)
