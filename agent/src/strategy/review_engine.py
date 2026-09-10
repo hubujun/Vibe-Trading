@@ -51,8 +51,14 @@ METRICS_STALE_DAYS = 30
 #: 参数自适应 — 杠杆乘子区间与步长 (第三圈)
 EXPOSURE_MIN = 0.25
 EXPOSURE_MAX = 1.0
-EXPOSURE_STEP = 0.5  # 降杠杆步长
+EXPOSURE_STEP = 0.5  # 历史字段: 旧"每次 *0.5"语义, 2026-09-10 改为目标档位制后不再使用
 EXPOSURE_RECOVER_STEP = 0.1  # 恢复步长
+#: 风控降杠杆"目标档位" — 由事件深度决定, 不连日累积连降
+EXPOSURE_DERISK_DD_TARGET = 0.5  # 回撤超限
+EXPOSURE_DERISK_STREAK_TARGET = 0.5  # 连亏 >= CONSECUTIVE_LOSSES 笔
+EXPOSURE_DERISK_DEEP_TARGET = 0.25  # 连亏 >= 2×CONSECUTIVE_LOSSES 笔 (深连亏才到下限)
+#: 降杠杆后需连续多少天"无风险事件"才允许开始恢复 (dwell, 防刚砍完就回补)
+EXPOSURE_RECOVER_DWELL_DAYS = 5
 #: 视为"在跑"的策略阶段 — 只有这些阶段谈得上样本积累/翻案
 RUNNING_PHASES = ("paper", "live")
 
@@ -554,64 +560,132 @@ def _persist_hypothesis_update(
 # ============================================================================
 
 
+def _recover_dwell_elapsed(history: list[dict[str, Any]] | None) -> bool:
+    """距最近一次"降杠杆"是否已满 EXPOSURE_RECOVER_DWELL_DAYS 天.
+
+    Args:
+        history: 策略的 adaptation_history (含 at/from_value/to_value).
+
+    Returns:
+        True = 允许恢复 (无历史 / 无降杠杆记录 / dwell 已过).
+    """
+    if not history:
+        return True
+    last_down: datetime | None = None
+    for h in history:
+        if not isinstance(h, dict) or h.get("param") != "exposure_multiplier":
+            continue
+        frm_raw = h.get("from_value")
+        to_raw = h.get("to_value")
+        if frm_raw is None or to_raw is None:
+            continue
+        try:
+            frm = float(frm_raw)
+            to = float(to_raw)
+        except (TypeError, ValueError):
+            continue
+        if to >= frm:
+            continue  # 只关心降杠杆那几次
+        dt = _parse_dt(str(h.get("at") or ""))
+        if dt is not None and (last_down is None or dt > last_down):
+            last_down = dt
+    if last_down is None:
+        return True
+    return (datetime.now(timezone.utc) - last_down).days >= EXPOSURE_RECOVER_DWELL_DAYS
+
+
 def compute_adaptations(
     review: StrategyReview,
     current_params: dict[str, Any] | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> list[ReviewAdaptation]:
     """根据复盘体检计算参数自适应变更 (仅计算, 由调用方应用持久化).
 
-    规则 (与用户风控偏好一致):
-    - 回撤超限 (dd_breach)        → exposure_multiplier *= 0.5 (下限 0.25)
-    - 连续亏损 >= 3 笔            → exposure_multiplier *= 0.5 (下限 0.25)
-    - 样本足且跑赢回测            → exposure_multiplier += 0.1 (上限 1.0)
+    规则 (2026-09-10 重构为"目标档位制 + 每日限速"):
+
+    - 回撤超限 (dd_breach)                  → exposure 收敛到 0.5
+    - 连亏 >= CONSECUTIVE_LOSSES(3) 笔      → 收敛到 0.5
+    - 连亏 >= 2×CONSECUTIVE_LOSSES(6) 笔    → 收敛到 0.25 (深连亏才到下限)
+    - 无风险事件                            → +0.1 恢复 (上限 1.0), 每天最多一步;
+      样本足且跑赢回测走同一恢复通道 (证据更硬), 同样每天最多一步
+
+    为什么不再 `current *= 0.5`:
+    旧实现每被调用一次就再砍一半, 而调用方是**每 30s 一次的 GET 轮询** —— 同一个
+    连亏事件在几分钟内就把仓位从 1.0 砍到下限 0.25, 然后卡死 (恢复要求"满 20 笔
+    且跑赢", 而压低仓位恰恰让样本更没信息量; 实测 30/37 条策略锁在 0.25, 日收益
+    只剩 ±0.1%)。目标档位制天然幂等: 同条件重复调用不再变化。
+
+    另有 dwell: 降杠杆后需连续 EXPOSURE_RECOVER_DWELL_DAYS 天无风险事件才开始
+    恢复, 否则"刚砍完、次日不连亏"就立刻 +0.1, 风控动作形同虚设。
 
     Args:
         review: 复盘引擎输出.
-        current_params: 策略当前参数 (含 exposure_multiplier), 缺省取默认值.
+        current_params: 策略当前参数 (含 exposure_multiplier); 恢复时会写入
+            `exposure_recover_at` 日期标记 (由调用方持久化, 防同日重复恢复).
+        history: 该策略的 adaptation_history, 用于 dwell 判定; 缺省不做 dwell.
 
     Returns:
         需要应用的参数变更列表 (空 = 无需调整).
     """
-    current = float((current_params or {}).get("exposure_multiplier", 1.0))
+    params: dict[str, Any] = current_params if current_params is not None else {}
+    current = float(params.get("exposure_multiplier", 1.0))
     vs = review.vs_backtest
     adaptations: list[ReviewAdaptation] = []
 
-    def _step_down(reason: str) -> None:
+    def _move(target: float, reason: str) -> None:
         nonlocal current
-        target = round(max(current * EXPOSURE_STEP, EXPOSURE_MIN), 2)
-        if target < current:
-            adaptations.append(
-                ReviewAdaptation(
-                    param="exposure_multiplier",
-                    from_value=current,
-                    to_value=target,
-                    reason=reason,
-                )
+        target = round(min(max(float(target), EXPOSURE_MIN), EXPOSURE_MAX), 2)
+        if abs(target - current) < 1e-9:
+            return
+        adaptations.append(
+            ReviewAdaptation(
+                param="exposure_multiplier",
+                from_value=current,
+                to_value=target,
+                reason=reason,
             )
-            current = target
+        )
+        current = target
 
-    def _step_up(reason: str) -> None:
-        nonlocal current
-        target = round(min(current + EXPOSURE_RECOVER_STEP, EXPOSURE_MAX), 2)
-        if target > current:
-            adaptations.append(
-                ReviewAdaptation(
-                    param="exposure_multiplier",
-                    from_value=current,
-                    to_value=target,
-                    reason=reason,
-                )
-            )
-            current = target
-
+    # --- 风控: 目标档位 (由事件深度决定; 已达档位则不再重复砍) ---
+    risk_target: float | None = None
+    reasons: list[str] = []
     if vs.dd_breach:
-        _step_down(
-            f"回撤 {vs.current_dd}% 超回测最大回撤 {vs.backtest_max_dd}% 的 "
-            f"{DD_BREACH_MULTIPLIER} 倍 → 自动降杠杆"
+        risk_target = EXPOSURE_DERISK_DD_TARGET
+        reasons.append(
+            f"回撤 {vs.current_dd}% 超回测最大回撤 {vs.backtest_max_dd}% 的 {DD_BREACH_MULTIPLIER} 倍"
         )
     if vs.consecutive_losses >= CONSECUTIVE_LOSSES:
-        _step_down(f"连续 {vs.consecutive_losses} 笔亏损 (≥{CONSECUTIVE_LOSSES}) → 自动降杠杆")
-    if vs.sample_sufficient and vs.outperforming is True:
-        _step_up(f"样本 {vs.paper_trades} 笔跑赢回测 → 逐步恢复杠杆")
+        deep = vs.consecutive_losses >= 2 * CONSECUTIVE_LOSSES
+        target = EXPOSURE_DERISK_DEEP_TARGET if deep else EXPOSURE_DERISK_STREAK_TARGET
+        risk_target = target if risk_target is None else min(risk_target, target)
+        reasons.append(f"连续 {vs.consecutive_losses} 笔亏损 (≥{CONSECUTIVE_LOSSES})")
+    if risk_target is not None:
+        # 风控只降不升: 目标档位高于当前持仓时保持不动 (否则已验证会出现"连亏反而加仓")
+        target = min(risk_target, current)
+        _move(target, f"{' + '.join(reasons)} → 仓位降到 {target}")
+        return adaptations
 
+    # --- 恢复: 每天最多一步; 刚降过杠杆要先等 dwell ---
+    if current >= EXPOSURE_MAX:
+        return adaptations
+    today = datetime.now(timezone.utc).date().isoformat()
+    if params.get("exposure_recover_at") == today:
+        return adaptations  # 今天已恢复过一步 (防 30s 轮询连日爬升)
+    fast = bool(vs.sample_sufficient and vs.outperforming is True)
+    if not fast and not _recover_dwell_elapsed(history):
+        return adaptations
+    if fast:
+        bt = f"{vs.backtest_annual:.1%}" if vs.backtest_annual is not None else "--"
+        _move(
+            current + EXPOSURE_RECOVER_STEP,
+            f"样本 {vs.paper_trades} 笔跑赢回测 ({bt}) → 恢复杠杆",
+        )
+    else:
+        _move(
+            current + EXPOSURE_RECOVER_STEP,
+            f"无回撤/连亏风险事件 → 逐步恢复杠杆 (上限 {EXPOSURE_MAX})",
+        )
+    if adaptations:
+        params["exposure_recover_at"] = today
     return adaptations

@@ -125,6 +125,20 @@ def _setup_own_strategy(
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
 
 
+def _derisk_history(days_ago: int) -> list[dict]:
+    """构造一条"days_ago 天前降过杠杆"的 adaptation_history (供 dwell 判定测试)."""
+    at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat(timespec="seconds")
+    return [
+        {
+            "param": "exposure_multiplier",
+            "from_value": 1.0,
+            "to_value": 0.25,
+            "reason": "连续 6 笔亏损 → 仓位降到 0.25",
+            "at": at,
+        }
+    ]
+
+
 def _winning_trades(n: int) -> list[dict]:
     return [{"from": f"2026-07-{i+1:02d}", "to": f"2026-07-{i+2:02d}", "ret": 0.5} for i in range(n)]
 
@@ -500,16 +514,54 @@ class TestAdaptations:
         assert adaptations[0].from_value == 1.0
         assert adaptations[0].to_value == 0.5
 
-    def test_consecutive_losses_halves_exposure(self) -> None:
+    def test_consecutive_losses_targets_half(self) -> None:
+        """连亏 3 笔 → 目标档位 0.5 (不是"每次调用再砍一半")."""
         from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
 
         review = StrategyReview(
             vs_backtest=ReviewVsBacktest(consecutive_losses=3, sample_sufficient=True)
         )
-        adaptations = compute_adaptations(review, {"exposure_multiplier": 0.5})
+        adaptations = compute_adaptations(review, {"exposure_multiplier": 1.0})
 
-        assert adaptations[0].from_value == 0.5
-        assert adaptations[0].to_value == 0.25  # 0.5*0.5
+        assert len(adaptations) == 1
+        assert adaptations[0].from_value == 1.0
+        assert adaptations[0].to_value == 0.5
+
+    def test_streak_three_does_not_double_cut(self) -> None:
+        """已在档位 → 同一个连亏事件不重复砍 (旧实现连日连降, 30s 轮询几分钟砍到 0.25)."""
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest(consecutive_losses=4))
+        assert compute_adaptations(review, {"exposure_multiplier": 0.5}) == []
+
+    def test_streak_six_targets_floor(self) -> None:
+        """深连亏 (≥6 笔) 才降到下限 0.25."""
+        from src.strategy.review_engine import (
+            EXPOSURE_MIN,
+            ReviewVsBacktest,
+            compute_adaptations,
+        )
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest(consecutive_losses=6))
+        adaptations = compute_adaptations(review, {"exposure_multiplier": 1.0})
+
+        assert adaptations[0].to_value == EXPOSURE_MIN
+
+    def test_derisk_idempotent_under_polling(self) -> None:
+        """回归 (2026-09-10): 同一连亏事件下反复调用 (GET 每 30s 轮询) 只降一次."""
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest(consecutive_losses=3))
+        params = {"exposure_multiplier": 1.0}
+
+        first = compute_adaptations(review, params)
+        params["exposure_multiplier"] = first[0].to_value  # 调用方应用
+        second = compute_adaptations(review, params)
+        third = compute_adaptations(review, params)
+
+        assert [a.to_value for a in first] == [0.5]
+        assert second == []
+        assert third == []
 
     def test_exposure_floor(self) -> None:
         from src.strategy.review_engine import (
@@ -523,7 +575,54 @@ class TestAdaptations:
         )
         adaptations = compute_adaptations(review, {"exposure_multiplier": EXPOSURE_MIN})
 
-        assert adaptations == []  # 已在下限, 不再降
+        assert adaptations == []  # 已在档位/下限, 不再降
+
+    def test_risk_event_blocks_recovery(self) -> None:
+        """风险事件期间不恢复 (旧实现只看"样本足+跑赢", 与风险事件可能同时成立)."""
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(
+            vs_backtest=ReviewVsBacktest(consecutive_losses=3, sample_sufficient=True,
+                                         outperforming=True, current_dd=0.0)
+        )
+        assert compute_adaptations(review, {"exposure_multiplier": 0.25}) == []
+
+    def test_recovery_once_per_day(self) -> None:
+        """同日不重复恢复 (防 30s 轮询把仓位一路爬回 1.0)."""
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        today = datetime.now(timezone.utc).date().isoformat()
+        review = StrategyReview(vs_backtest=ReviewVsBacktest())
+        params = {"exposure_multiplier": 0.25, "exposure_recover_at": today}
+
+        assert compute_adaptations(review, params) == []
+
+    def test_recovery_dwell_blocks_right_after_derisk(self) -> None:
+        """刚降过杠杆 → dwell 未满不允许恢复 (否则风控动作形同虚设)."""
+        from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest())
+        params = {"exposure_multiplier": 0.25}
+
+        assert compute_adaptations(review, params, _derisk_history(days_ago=1)) == []
+
+    def test_recovery_dwell_elapsed_allows_step_up(self) -> None:
+        """dwell 已满 → 恢复一步 +0.1 并写下当日标记."""
+        from src.strategy.review_engine import (
+            EXPOSURE_RECOVER_DWELL_DAYS,
+            ReviewVsBacktest,
+            compute_adaptations,
+        )
+
+        review = StrategyReview(vs_backtest=ReviewVsBacktest())
+        params = {"exposure_multiplier": 0.25}
+
+        adaptations = compute_adaptations(
+            review, params, _derisk_history(days_ago=EXPOSURE_RECOVER_DWELL_DAYS + 1)
+        )
+
+        assert [a.to_value for a in adaptations] == [0.35]
+        assert params["exposure_recover_at"] == datetime.now(timezone.utc).date().isoformat()
 
     def test_outperforming_recovers_exposure(self) -> None:
         from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
@@ -536,7 +635,7 @@ class TestAdaptations:
         adaptations = compute_adaptations(review, {"exposure_multiplier": 0.5})
 
         assert adaptations[0].from_value == 0.5
-        assert adaptations[0].to_value == 0.6
+        assert adaptations[0].to_value == 0.6  # 证据快通道: 不受 dwell 限制
 
     def test_no_adaptation_when_healthy(self) -> None:
         from src.strategy.review_engine import ReviewVsBacktest, compute_adaptations
