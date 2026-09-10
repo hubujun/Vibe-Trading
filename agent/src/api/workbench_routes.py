@@ -317,7 +317,7 @@ def _apply_adaptations(review: Any, strategies: list[dict[str, Any]], persist: b
         for strategy in strategies:
             params = dict(strategy.get("params") or {})
             params.setdefault("exposure_multiplier", 1.0)
-            computed = compute_adaptations(review, params)
+            computed = compute_adaptations(review, params, strategy.get("adaptation_history"))
             if not computed:
                 continue
             for a in computed:
