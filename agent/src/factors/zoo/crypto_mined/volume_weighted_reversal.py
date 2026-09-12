@@ -1,34 +1,29 @@
-"""Crypto-mined volume-weighted short-term reversal factor."""
+"""crypto reversal/volume: volume-weighted five-day reversal."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import decay_linear, delta, rank, safe_div, ts_mean
+from src.factors.base import delta, rank, safe_div, ts_mean
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_weighted_reversal",
-    "nickname": "Volume-Weighted Reversal",
-    "theme": ["volume"],
-    "formula_latex": "\\mathrm{rank}\\left(\\mathrm{decay\\_linear}_5\\left(-r_{1}\\cdot V/\\overline{V}_{20}\\right)\\right)",
+    "nickname": "量价加权反转",
+    "theme": ["reversal", "volume"],
+    "formula_latex": r"\mathrm{rank}_{cs}\!\left(-\mathrm{rank}_{cs}\!\left(\frac{\Delta_5 close}{close_{t-5}}\right)\cdot \mathrm{rank}_{cs}\!\left(\frac{volume}{\mathrm{tsmean}_{20}(volume)}\right)\right)",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 2,
-    "min_warmup_bars": 30,
-    "notes": "Amplifies short-term reversal with above-average trading volume.",
+    "decay_horizon": 5,
+    "min_warmup_bars": 20,
+    "notes": "Five-day price reversal amplified when recent volume is high; cross-sectional rank composite.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return the cross-sectional rank of volume-scaled one-day reversal."""
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
-
-    d_close = delta(close, 1)
-    close_ret = safe_div(d_close, close - d_close)
-
-    volume_ratio = safe_div(volume, ts_mean(volume, 20))
-    score = -close_ret * volume_ratio
-
-    return rank(decay_linear(score, 5))
+    ret5 = safe_div(delta(close, 5), close.shift(5))
+    vol_ratio = safe_div(volume, ts_mean(volume, 20))
+    raw = -rank(ret5) * rank(vol_ratio)
+    return rank(raw) - 0.5
