@@ -275,7 +275,13 @@ def compute_review(
             start_dt = _parse_dt(str(started_at))
             if start_dt is not None:
                 days = max((today - start_dt).days, 1)
-                vs.paper_annual = _annualized(float(nav), days)
+                # 单位契约: paper_annual 与 backtest_annual 必须**同口径 = 百分数**
+                # (backtest_annual 来自回测指标, 量纲是百分数 31.94)。
+                # 曾漏乘 100 返回小数 → 与百分数比较恒为 False ("跑赢回测" 门永不成立)
+                # + 前端文案印出 "落后回测 3194.0%" 的荒谬数字。
+                ann = _annualized(float(nav), days)
+                if ann is not None:
+                    vs.paper_annual = ann * 100.0
         navs = _reconstruct_nav(trades, float(nav)) if trades else []
         if navs:
             vs.current_dd = round(_max_drawdown(navs) * 100, 2)
@@ -349,14 +355,14 @@ def compute_review(
         recs.append(
             ReviewRecommendation(
                 level="info",
-                text=f"模拟盘年化 {vs.paper_annual:.1%} 跑赢回测 {vs.backtest_annual:.1%}，可评估上线执行",
+                text=f"模拟盘年化 {vs.paper_annual:.1f}% 跑赢回测 {vs.backtest_annual:.1f}%，可评估上线执行",
             )
         )
     elif vs.outperforming is False:
         recs.append(
             ReviewRecommendation(
                 level="warn",
-                text=f"模拟盘年化 {vs.paper_annual:.1%} 落后回测 {vs.backtest_annual:.1%}，建议回到研究阶段检查参数",
+                text=f"模拟盘年化 {vs.paper_annual:.1f}% 落后回测 {vs.backtest_annual:.1f}%，建议回到研究阶段检查参数",
             )
         )
     if vs.dd_breach:
@@ -476,7 +482,7 @@ def _apply_hypothesis_rule(
             to_status="validated",
             reason=(
                 f"自身模拟盘 {len(trades)} 笔样本净值 {float(own_nav):.4f} (>1.0) "
-                f"且基策略跑赢回测 (年化 {vs.backtest_annual:.1%}) → validated"
+                f"且基策略跑赢回测 (年化 {vs.backtest_annual:.1f}%) → validated"
             ),
         )
     # validated + 回撤超限 → monitoring
@@ -676,7 +682,7 @@ def compute_adaptations(
     if not fast and not _recover_dwell_elapsed(history):
         return adaptations
     if fast:
-        bt = f"{vs.backtest_annual:.1%}" if vs.backtest_annual is not None else "--"
+        bt = f"{vs.backtest_annual:.1f}%" if vs.backtest_annual is not None else "--"
         _move(
             current + EXPOSURE_RECOVER_STEP,
             f"样本 {vs.paper_trades} 笔跑赢回测 ({bt}) → 恢复杠杆",
