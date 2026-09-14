@@ -184,6 +184,38 @@ class TestVsBacktest:
         assert review.vs_backtest.outperforming is True
         assert any("跑赢回测" in r.text for r in review.recommendations)
 
+    def test_paper_annual_shares_units_with_backtest(self, tmp_path: Path) -> None:
+        """口径回归: paper_annual 必须是百分数, 与 backtest_annual 可直接比较.
+
+        2026-09-14 修复 — 原实现返回小数 (nav**(365/days) - 1), 与百分数量的
+        backtest_annual 比较恒为 False → "跑赢回测" 门永不成立 (假设晋升卡死、
+        敏口快速恢复通道失效), 且文案印出 "落后回测 3194.0%" 这类荒谬数字。
+        旧测试用 nav=1.5 (年化上万个百分点), 单位错了照样通过 —— 本测试刻意取
+        年化刚好落在基准两侧的净值, 单位一错或比较一错就翻。
+        """
+        days = 20
+        nav = 1.02
+        expected_pct = (nav ** (365.0 / days) - 1.0) * 100.0  # ≈ 43.5%
+        trades = _winning_trades(MIN_TRADES)
+
+        for backtest_annual, expected in ((expected_pct - 1.0, True), (expected_pct + 1.0, False)):
+            state = tmp_path / "state.json"
+            state.write_text(
+                json.dumps(_make_state(nav=nav, trades=trades, started_at=_days_ago(days))),
+                encoding="utf-8",
+            )
+            metrics = tmp_path / "backtest_metrics.json"
+            metrics.write_text(json.dumps(_make_metrics(annual=backtest_annual)), encoding="utf-8")
+
+            review = compute_review(state, metrics)
+
+            paper_annual = review.vs_backtest.paper_annual
+            assert paper_annual is not None
+            assert abs(paper_annual - expected_pct) < 0.5, (
+                f"paper_annual={paper_annual} 与百分数口径 {expected_pct} 不符 (单位混用回归)"
+            )
+            assert review.vs_backtest.outperforming is expected
+
     def test_dd_breach_detected(self, tmp_path: Path) -> None:
         # nav≈0.8, 回撤 ≈20% > 10.62*1.5 = 15.93 → breach
         state = tmp_path / "state.json"
