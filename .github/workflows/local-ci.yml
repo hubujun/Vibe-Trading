@@ -36,6 +36,7 @@ jobs:
                  agent/tests/test_variant_generator.py \
                  agent/tests/test_dynamic_n.py \
                  agent/tests/test_crazy_bull.py \
+                 agent/tests/test_daily_signal_settled.py \
                  agent/tests/test_macro_events.py \
                  agent/tests/test_workbench_routes.py \
                  agent/tests/test_review_engine.py \
