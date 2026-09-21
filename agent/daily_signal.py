@@ -11,6 +11,7 @@
 输出: 今日多空信号 + 组合模拟盘累计表现
 """
 import sys, os, json, time, math, argparse
+from datetime import datetime, timedelta, timezone
 import requests
 import pandas as pd
 
@@ -43,7 +44,9 @@ FUNDING_RATE_DAY = 0.0003
 #: 信号逻辑版本 — 信号/记账逻辑变更时 +1, 每笔调仓记录版本 (复盘可按版本分组)
 #: v1: 静态权重 + 动态多空比 + 板块上限 + 波动率目标 + 事件/regime (与回测一致)
 #: v2: + 疯牛保险普涨降仓 (与回测一致)
-SIGNAL_LOGIC_VERSION = 4
+#: v4: + 面板补齐 high/low/open 列
+#: v5: 记账只用**已结算**日线蜡烛 (剔除当日进行中蜡烛) — 修「每天只统计 7 小时行情」
+SIGNAL_LOGIC_VERSION = 5
 WORKBENCH_PATH = os.path.expanduser('~/.vibe-trading/workbench/strategies.json')
 RUNTIME_ROOT = os.path.expanduser('~/.vibe-trading/runs')
 DAYS = 800
@@ -219,6 +222,38 @@ def _save_panel_cache(close_df, volume_df, high_df, low_df, open_df) -> None:
         pass
 
 
+def _settled_panel(close_df: pd.DataFrame, volume_df: pd.DataFrame, high_df: pd.DataFrame,
+                   low_df: pd.DataFrame, open_df: pd.DataFrame, now=None
+                   ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """剔除尾部「未结算」的日线蜡烛 — 只保留北京日期 < 今天(=已跑完 24 小时)的行.
+
+    2026-09-21 修复: 信号 cron 07:00 运行, 面板最后一根是**当日进行中**的蜡烛
+    (北京 00:00 起只走了 7 小时)。原实现 (a) 拿它的 07:00 价当已结算收盘价打分,
+    (b) 记账区间 (prev, last] 又只覆盖这一根 7 小时蜡烛 — 而下一笔又只取次日 0-7 点,
+    于是**每天都只统计亚洲早盘的 7 小时行情**, 07:00-24:00 的行情从未进入模拟盘:
+    687 笔同仓位实测 —— 记录口径平均幅度 0.296% / 标准差 0.523%, 完整日蜡烛 1.579%
+    / 2.092%, 即只 capture 19~25%; 回测 (daily = (w.shift(1) * rets).sum()) 用的是
+    完整日收益, 两边口径差 4~5 倍。用记录仓位 × 完整日蜡烛重算 → 盈利条数 6/43 → 24/43,
+    "模拟盘跑输回测" 实为口径假象。
+
+    修后语义 = 回测的 T-1 收盘: 用已结算蜡烛出信号, 赚后一根完整蜡烛的收益
+    (每根蜡烛恰好被记账一次, 与 backtest_variant 的 w.shift(1) 一致).
+
+    Args:
+        now: 用于测试注入的"当前时刻"(北京), 缺省取系统时间.
+    """
+    if close_df is None or len(close_df) < 300:
+        return close_df, volume_df, high_df, low_df, open_df
+    ts = now if now is not None else datetime.now(timezone(timedelta(hours=8)))
+    today = pd.Timestamp(ts.date())
+    keep = close_df.index < today
+    n_kept = int(keep.sum())
+    if n_kept == len(close_df) or n_kept < 300:
+        return close_df, volume_df, high_df, low_df, open_df  # 已结算 / 裁剪会毁面板 → 不动
+    return (close_df.loc[keep], volume_df.loc[keep], high_df.loc[keep],
+            low_df.loc[keep], open_df.loc[keep])
+
+
 def build_signal(strategy: dict) -> dict:
     """按策略的 signal_definition 生成今日多空信号 + 更新该策略模拟盘."""
     from src.strategy.variant_backtester import load_factor_module, parse_signal_definition
@@ -263,6 +298,12 @@ def build_signal(strategy: dict) -> dict:
         low_df = pd.DataFrame(lows).reindex(close_df.index).ffill()
         open_df = pd.DataFrame(opens).reindex(close_df.index).ffill()
         _save_panel_cache(close_df, volume_df, high_df, low_df, open_df)
+
+    # 只用已结算蜡烛 (剔除当日进行中的那根) — 见 _settled_panel 说明 (v5)
+    close_df, volume_df, high_df, low_df, open_df = _settled_panel(
+        close_df, volume_df, high_df, low_df, open_df)
+    if close_df is None or len(close_df) < 300:
+        return {'error': 'panel 数据不足 (剔除未结算蜡烛后)'}
 
     # 因子合成: Σ w_i × factor_i (学术因子已 z-score, zoo 因子 raw → 行 z-score 统一)
     # 注意: 权重必须与 backtest_variant 一致 (静态权重) — 实盘行为 = 回测行为
