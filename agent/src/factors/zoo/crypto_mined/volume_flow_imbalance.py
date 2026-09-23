@@ -1,48 +1,31 @@
-"""crypto VOLUME: signed volume flow imbalance (OBV-slope proxy).
-
-Classical On-Balance-Volume cumulates signed volume, which is unbounded and
-non-stationary. Here the same information is captured in a stationary way:
-each bar's volume is signed by the direction of the close-to-close return and
-normalised by a 20-bar volume baseline, then aggregated with a linearly
-decayed moving average so that recent flow dominates.
-"""
+"""crypto VOLUME: signed volume-flow imbalance."""
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
-from src.factors.base import decay_linear, safe_div, ts_mean
+from src.factors.base import delta, safe_div, signed_power, ts_mean
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_flow_imbalance",
-    "nickname": "签名成交量流不平衡",
+    "nickname": "方向性量能失衡",
     "theme": ["volume"],
-    "formula_latex": "\\mathrm{DECAY}_{10}\\!\\left[\\frac{\\mathrm{sign}(r_t)\\,V_t}{\\overline{V}_{20}}\\right]",
+    "formula_latex": "\\frac{\\mathrm{mean}_{20}\\left(V_t\\,\\mathrm{sgn}(r_t)|r_t|^{1/2}\\right)}{\\mathrm{mean}_{20}(V_t)}",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 10,
-    "min_warmup_bars": 30,
-    "notes": (
-        "Volume signed by the sign of the daily return, divided by the 20-bar "
-        "mean volume, then linearly decay-weighted over 10 bars. A stationary "
-        "stand-in for the slope of On-Balance-Volume, isolating whether "
-        "turnover is flowing into up bars or down bars."
-    ),
+    "decay_horizon": 5,
+    "min_warmup_bars": 21,
+    "notes": "Volume weighted by return direction and square-rooted magnitude, averaged and normalised by average volume; measures the net directional volume flow (up-volume dominance vs down-volume dominance).",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Decay-weighted signed volume flow, aligned to the close index."""
+    """Return the normalised signed volume-flow imbalance, aligned to close."""
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
 
-    ret = safe_div(close, close.shift(1)) - 1.0
-    direction = np.sign(ret)
+    ret = safe_div(delta(close, 1), close.shift(1))
+    flow = volume * signed_power(ret, 0.5)
 
-    flow = direction * volume
-    baseline = ts_mean(volume, 20)
-    norm_flow = safe_div(flow, baseline)
-
-    return decay_linear(norm_flow, 10)
+    return safe_div(ts_mean(flow, 20), ts_mean(volume, 20))

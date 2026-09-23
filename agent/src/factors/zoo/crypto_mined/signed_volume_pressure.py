@@ -1,44 +1,34 @@
-"""crypto VOLUME: net signed volume pressure over recent bars."""
+"""crypto VOLUME: signed volume pressure."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import zscore, delta, ts_mean, safe_div, signed_power
+from src.factors.base import rank, safe_div, ts_mean
 
 __alpha_meta__ = {
     "id": "crypto_mined_signed_volume_pressure",
-    "nickname": "带符号成交量压力",
+    "nickname": "有向量压",
     "theme": ["volume"],
-    "formula_latex": (
-        "z\\left(\\mathrm{mean}_{10}\\left(\\mathrm{sgn}(\\Delta P_t)"
-        "\\cdot \\frac{V_t}{\\mathrm{mean}_{20}(V_t)}\\right)\\right)"
-    ),
-    "columns_required": ["close", "volume"],
+    "formula_latex": "\\operatorname{rank}(\\operatorname{ts\\_mean}(V_t \\cdot \\frac{2C_t - H_t - L_t}{H_t - L_t}, 10))",
+    "columns_required": ["close", "high", "low", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
     "decay_horizon": 10,
-    "min_warmup_bars": 30,
-    "notes": (
-        "Signs each bar's relative volume by the direction of the price "
-        "change, then averages over 10 bars to obtain a net signed flow "
-        "pressure. Persistent positive values signal sustained buy-side "
-        "participation on above-average volume."
-    ),
+    "min_warmup_bars": 11,
+    "notes": "Volume multiplied by close location value, averaged over 10 bars and cross-sectionally ranked. Positive readings indicate volume concentrated near the high.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Return cross-sectional rank of signed volume pressure."""
     close = panel["close"].astype(float)
+    high = panel["high"].astype(float)
+    low = panel["low"].astype(float)
     volume = panel["volume"].astype(float)
 
-    ret = delta(close, 1)
-    ret_sign = signed_power(ret, 0.0)
-
-    vol_base = ts_mean(volume, 20)
-    vol_ratio = safe_div(volume, vol_base)
-
-    signed_flow = ret_sign * vol_ratio
-    pressure = ts_mean(signed_flow, 10)
-
-    return zscore(pressure)
+    spread = high - low
+    close_location = safe_div(2.0 * close - high - low, spread)
+    signed_volume = volume * close_location
+    pressure = ts_mean(signed_volume, 10)
+    return rank(pressure)

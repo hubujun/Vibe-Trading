@@ -1,35 +1,30 @@
-"""Volume-range efficiency factor for crypto markets."""
+"""crypto VOLUME: volume-adjusted range efficiency."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import rank, safe_div, ts_mean
+from src.factors.base import safe_div, ts_mean
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_range_efficiency",
-    "nickname": "volume_range_efficiency",
+    "nickname": "量能区间效率",
     "theme": ["volume"],
-    "formula_latex": r"R_{cs}\left(\frac{V_t/\mathrm{MA}_{20}(V_t)}{R_t/\mathrm{MA}_{20}(R_t)}\right),\quad R_t=(H_t-L_t)/O_t",
-    "columns_required": ["open", "high", "low", "volume"],
+    "formula_latex": "-\\frac{\\mathrm{mean}_n(H_t - L_t)}{\\mathrm{mean}_n(V_t)}",
+    "columns_required": ["high", "low", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
     "decay_horizon": 5,
-    "min_warmup_bars": 20,
-    "notes": "Captures volume shocks that occur without proportional range expansion, indicating absorbed liquidity or stealth positioning.",
+    "min_warmup_bars": 5,
+    "notes": "Negative average high-low range per unit of volume; lower volume required for range expansion is treated as stronger absorption.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    close = panel["close"].astype(float)
-    open_ = panel["open"].astype(float)
     high = panel["high"].astype(float)
     low = panel["low"].astype(float)
     volume = panel["volume"].astype(float)
-
-    range_ratio = safe_div(high - low, open_)
-    volume_ratio = safe_div(volume, ts_mean(volume, 20))
-    range_shock = safe_div(range_ratio, ts_mean(range_ratio, 20))
-    volume_range_efficiency = safe_div(volume_ratio, range_shock)
-
-    return rank(volume_range_efficiency).reindex_like(close)
+    rng = high - low
+    mean_range = ts_mean(rng, 5)
+    mean_volume = ts_mean(volume, 5)
+    return -safe_div(mean_range, mean_volume)
