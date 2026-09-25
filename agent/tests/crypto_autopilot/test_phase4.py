@@ -443,6 +443,9 @@ class TestLiveOrderPath:
         }]
         monkeypatch.setattr(orchestrator, "_factor_has_signal", lambda info: False)
         live = MagicMock()
+        # The rules path reads the account equity each tick; a live executor
+        # returns a number, so the stub must too (a bare MagicMock breaks `> 0`).
+        live.read_account_equity.return_value = 1000.0
         monkeypatch.setattr(orchestrator, "_live_executor", live)
 
         asyncio.run(orchestrator._tick_trade())
