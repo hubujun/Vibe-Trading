@@ -431,11 +431,12 @@ vibe-trading connector install /tmp/my-broker
 
 ## 📡 데이터 소스 & 스마트 폴백
 
-`get_market_data` 한 번의 호출, **28개 시장 데이터 소스**(그중 **QVeris**는 선택형 유료 마켓플레이스). `source: "auto"`로 설정하면 로더가 심볼에 따라 소스를 고르고, 시장별 체인을 **IP 차단 위험** 순으로 따라갑니다: 절대 차단되지 않는 공개 소스를 먼저, 속도 제한 / 키 기반 소스를 마지막에 둡니다. 설정 불필요, 단일 장애 지점 없음.
+`get_market_data` 한 번의 호출, **30개 시장 데이터 소스**(그중 **QVeris**는 선택형 유료 마켓플레이스). `source: "auto"`로 설정하면 로더가 심볼에 따라 소스를 고르고, 시장별 체인을 **IP 차단 위험** 순으로 따라갑니다: 절대 차단되지 않는 공개 소스를 먼저, 속도 제한 / 키 기반 소스를 마지막에 둡니다. 설정 불필요, 단일 장애 지점 없음.
 
 | Source | Markets | Auth | Role |
 |--------|---------|------|------|
 | `tencent` · `mootdx` | A-share + HK | none | never IP-banned (`mootdx` = 通达信 TCP) |
+| `baidu` | A주 | 없음 | 百度股市通 일봉. `mootdx` 뒤에서 A주 체인에 합류 |
 | `eastmoney` | A / US / HK | none | OHLCV + deep fundamentals & flow tools (throttled) |
 | `baostock` · `akshare` | A (+ US/HK/futures/macro/fx) | none | free fallbacks |
 | `tushare` | A / HK / futures / fund / macro | token | richest A-share |
@@ -448,6 +449,7 @@ vibe-trading connector install /tmp/my-broker
 | `qveris` | 글로벌 멀티에셋 | key · credits | **프리미엄 마켓플레이스** — key 하나로 63+ providers (명시 지정 전용, auto 폴백 제외) |
 | `nobitex` · `wallex` | 크립토(이란 토만 표시 페어) | 없음 | 공개 UDF 엔드포인트, **명시 지정 전용** — 토만 표시 소스는 이 둘뿐이라, USD 표시 시세가 대신 들어올 수 있는 crypto 체인에는 절대 합류하지 않습니다 |
 | `okx` · `ccxt` · `binance` | crypto | none | OKX + 100+ exchanges + Binance historical / USD-M perps |
+| `dune` | 크립토(온체인) | key(`DUNE_API_KEY`) | Dune Analytics 온체인 지표. autopilot 팩터 파이프라인용 |
 | `futu` | HK / A | OpenD | optional local FutuOpenD |
 | `mt5` | forex / metals | MT5 terminal | MetaTrader 5 (Exness-style) forex / metal bars, 1m–1D |
 | `tickerall` | forex / metals | key + 계정(읽기 전용) | 동일 브로커의 MT5 피드를 **호스팅형**으로 — 로컬 터미널 불필요, OS 무관(명시 지정 전용, auto 폴백에는 절대 들어가지 않음) |
@@ -457,7 +459,7 @@ vibe-trading connector install /tmp/my-broker
 
 **폴백 체인 (IP 차단 위험 순):**
 
-- **A주** → `tencent` · `mootdx` · `eastmoney` · `baostock` · `akshare` · `tushare` · `gildata` · `local`
+- **A주** → `tencent` · `mootdx` · `baidu` · `eastmoney` · `baostock` · `akshare` · `tushare` · `gildata` · `local`
 - **미국** → `yahoo` · `stooq` · `sina` · `eastmoney` · `yfinance` · `tiingo` · `fmp` · `finnhub` · `alphavantage` · `longbridge` · `akshare` · `local`
 - **홍콩** → `tencent` · `eastmoney` · `yahoo` · `futu` · `akshare` · `yfinance` · `tushare` · `longbridge` · `local`
 - **인도 (NSE/BSE)** → `yahoo` · `yfinance` · `india_broker` · `local`
@@ -629,7 +631,7 @@ Paper-vs-live는 **구조적 브로커별 런타임 가드**(account-id 형식, 
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>7개 패밀리에 걸친 562개 사전 빌 드된 quant alpha</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>7개 패밀리에 걸친 622개 사전 빌 드된 quant alpha</sub></summary>
 
 - 🧬 operator 계층에서 lookahead가 금지된 522개 cross-sectional alpha
 - 📈 한 줄 CLI로 IC + IR + alive/reversed/dead 분류 수행
@@ -1713,7 +1715,7 @@ Vibe-Trading/
 │   │
 │   └── backtest/                   # Backtest engines
 │       ├── engines/                #   9 engines + composite cross-market engine + options_portfolio
-│       ├── loaders/                #   28 sources: tushare, okx, nobitex, wallex, binance, yfinance, akshare, baostock, tencent, mootdx, ccxt, futu, pykrx, local, eastmoney, sina, stooq, yahoo, finnhub, alphavantage, tiingo, fmp, longbridge, mt5, qveris, india_broker, tickerall, gildata
+│       ├── loaders/                #   30 sources: tushare, okx, nobitex, wallex, binance, yfinance, akshare, baostock, tencent, mootdx,baidu, ccxt, futu, pykrx, local, eastmoney, sina, stooq, yahoo, finnhub, alphavantage, tiingo, fmp, longbridge, mt5, qveris, india_broker, tickerall, gildata, dune
 │       │   ├── base.py             #   DataLoader Protocol
 │       │   └── registry.py         #   Registry + auto-fallback chains
 │       └── optimizers/             #   MVO, equal vol, max div, risk parity

@@ -8,6 +8,7 @@ notional, and the out-of-sample promotion recheck.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 import numpy as np
@@ -320,7 +321,7 @@ class TestOosRecheck:
             lambda *a, **k: None,
         )
         info = {"alpha_id": "paper_hold_01", "candidate": _candidate("paper_hold_01")}
-        ok, details = orchestrator._promotion_oos_recheck(info)
+        ok, details = asyncio.run(orchestrator._promotion_oos_recheck(info))
         assert ok
         assert details.get("skipped") == "history unavailable"
 
@@ -336,7 +337,7 @@ class TestOosRecheck:
             )(),
         )
         info = {"alpha_id": "paper_err_01", "candidate": _candidate("paper_err_01")}
-        ok, details = orchestrator._promotion_oos_recheck(info)
+        ok, details = asyncio.run(orchestrator._promotion_oos_recheck(info))
         assert not ok
         assert "boom" in details["reason"]
 
@@ -358,7 +359,7 @@ class TestOosRecheck:
             }),
         )
         info = {"alpha_id": "paper_gate_01", "candidate": _candidate("paper_gate_01")}
-        ok, details = orchestrator._promotion_oos_recheck(info)
+        ok, details = asyncio.run(orchestrator._promotion_oos_recheck(info))
         assert not ok
         assert "0.4" in details["reason"]
 
@@ -380,7 +381,7 @@ class TestOosRecheck:
             }),
         )
         info = {"alpha_id": "paper_ok_01", "candidate": _candidate("paper_ok_01")}
-        ok, details = orchestrator._promotion_oos_recheck(info)
+        ok, details = asyncio.run(orchestrator._promotion_oos_recheck(info))
         assert ok
         assert details.get("consistency_rate") == 0.9
 
