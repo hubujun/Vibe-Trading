@@ -1,4 +1,4 @@
-"""crypto VOLUME: volume-weighted reversal."""
+"""crypto REVERSAL: volume-weighted stretch away from the local mean."""
 
 from __future__ import annotations
 
@@ -8,23 +8,34 @@ from src.factors.base import safe_div, ts_mean, ts_rank, zscore
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_weighted_reversal",
-    "nickname": "量能加权反转",
-    "theme": ["volume"],
-    "formula_latex": r"- zscore\left(\frac{close_t}{close_{t-1}} - 1\right) \cdot \mathrm{ts\_rank}\left(\frac{volume_t}{\mathrm{ts\_mean}(volume, 20)} - 1, 10\right)",
+    "nickname": "量能加权均值回归",
+    "theme": ["reversal"],
+    "formula_latex": (
+        "\\mathrm{zscore}\\!\\left("
+        "-\\frac{C_t - \\bar{C}_{10}}{\\bar{C}_{10}}"
+        "\\cdot \\mathrm{ts\\_rank}(V_t, 20)\\right)"
+    ),
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 3,
+    "decay_horizon": 10,
     "min_warmup_bars": 21,
-    "notes": "Reversal signal weighted by abnormal volume rank; high volume shocks against recent returns.",
+    "notes": (
+        "Short-horizon displacement from the 10-bar mean is faded, but only "
+        "in proportion to the rolling rank of volume: stretched prices on "
+        "heavy volume are treated as exhaustion, while quiet drifts are "
+        "ignored. Cross-sectionally z-scored."
+    ),
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return volume-weighted reversal factor aligned to close."""
+    """Volume-scaled mean-reversion signal, cross-sectionally z-scored."""
     close = panel["close"].astype(float)
-    volume = panel["volume"].astype(float).reindex(index=close.index, columns=close.columns)
-    ret = safe_div(close, close.shift(1)) - 1.0
-    vol_base = ts_mean(volume, 20)
-    vol_shock = safe_div(volume, vol_base) - 1.0
-    return -zscore(ret) * ts_rank(vol_shock, 10)
+    volume = panel["volume"].astype(float)
+
+    fair = ts_mean(close, 10)
+    dev = safe_div(close - fair, fair)
+    vol_rank = ts_rank(volume, 20)
+    stretched = -dev * vol_rank
+    return zscore(stretched)
