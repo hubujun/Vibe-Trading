@@ -25,6 +25,7 @@ import tempfile
 
 CANARY_SYMBOLS = {
     "akshare": "601398.SH",
+    "baidu": "601398.SH",
     "baostock": "sh.601398",
     "binance": "BTC-USDT",
     "ccxt": "BTC-USDT",
