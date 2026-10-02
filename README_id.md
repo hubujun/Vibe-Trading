@@ -820,7 +820,7 @@ bersama roster bawaan (file dengan nama sama akan override, seperti user skill) 
 </details>
 
 <details>
-<summary><b>Alpha Zoo</b> <sub>638 alpha quant siap pakai dalam 7 keluarga</sub></summary>
+<summary><b>Alpha Zoo</b> <sub>641 alpha quant siap pakai dalam 7 keluarga</sub></summary>
 
 - 🧬 462 alpha cross-sectional, lookahead dilarang pada layer operator
 - 📈 IC + IR + kategorisasi alive/reversed/dead dalam satu perintah CLI
