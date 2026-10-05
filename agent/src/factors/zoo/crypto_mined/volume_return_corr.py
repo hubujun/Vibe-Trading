@@ -1,4 +1,4 @@
-"""crypto VOLUME: rolling correlation between daily returns and volume."""
+"""crypto VOLUME: volume-return correlation reversal."""
 
 from __future__ import annotations
 
@@ -8,21 +8,23 @@ from src.factors.base import delta, safe_div, ts_corr
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_return_corr",
-    "nickname": "量价滚动相关",
-    "theme": ["volume", "momentum"],
-    "formula_latex": "\\mathrm{Corr}_{10}(r_t, V_t),\\quad r_t = \\frac{C_t - C_{t-1}}{C_{t-1}}",
+    "nickname": "量价相关反转",
+    "theme": ["volume", "microstructure"],
+    "formula_latex": "-\\mathrm{ts\\_corr}\\left(\\frac{\\Delta c_t}{c_{t-1}}, \\Delta v_t, 20\\right)",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 5,
-    "min_warmup_bars": 12,
-    "notes": "Positive values indicate volume-confirmed directional moves; negative values indicate volume on reversal days.",
+    "decay_horizon": 20,
+    "min_warmup_bars": 22,
+    "notes": "Rolling correlation between daily returns and volume changes; strongly positive values indicate volume-chasing rallies that historically revert.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Return negated 20-bar correlation between returns and volume changes."""
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
     ret = safe_div(delta(close, 1), close.shift(1))
-    corr = ts_corr(ret, volume, 10)
-    return corr
+    vol_chg = delta(volume, 1)
+    corr = ts_corr(ret, vol_chg, 20)
+    return -corr
