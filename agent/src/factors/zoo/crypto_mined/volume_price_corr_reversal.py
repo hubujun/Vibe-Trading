@@ -1,29 +1,39 @@
-"""crypto VOLUME: rolling correlation between returns and volume growth, negated."""
+"""crypto VOLUME: volume-price co-movement reversal filtered by volume volatility."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-from src.factors.base import delta, safe_div, ts_corr
+from src.factors.base import delta, safe_div, ts_corr, ts_mean, ts_std, zscore
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_price_corr_reversal",
-    "nickname": "Volume-Price Correlation Reversal",
+    "nickname": "量价共振反转",
     "theme": ["volume"],
-    "formula_latex": "-\\operatorname{Corr}_{20}\\left(r_t, \\frac{V_t - V_{t-1}}{V_{t-1}}\\right)",
+    "formula_latex": r"-\mathrm{corr}_{10}(\Delta C_t, \Delta V_t)\cdot \frac{\sigma_{20}(V_t)}{\mu_{20}(V_t)}",
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 10,
-    "min_warmup_bars": 21,
-    "notes": "Negative rolling correlation between daily returns and volume growth; favors divergence between price and volume.",
+    "decay_horizon": 5,
+    "min_warmup_bars": 25,
+    "notes": "Negative 10-bar correlation between price changes and volume changes, "
+             "scaled by the 20-bar coefficient of variation of volume. When price moves "
+             "are tightly confirmed by volume (high positive corr) in an otherwise noisy "
+             "volume regime, the move is crowded and mean-reverts; the CV multiplier "
+             "rewards signals that appear in genuinely volatile volume regimes.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return the negated 20-bar return-volume growth correlation."""
+    """Return the volume-confirmation reversal score, aligned to close."""
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
-    ret = safe_div(delta(close, 1), close.shift(1))
-    vol_chg = safe_div(delta(volume, 1), volume.shift(1))
-    return -ts_corr(ret, vol_chg, 20)
+
+    d_close = delta(close, 1)
+    d_volume = delta(volume, 1)
+
+    co_move = ts_corr(d_close, d_volume, 10)
+    vol_cv = safe_div(ts_std(volume, 20), ts_mean(volume, 20))
+
+    raw = -co_move * vol_cv
+    return zscore(raw)
