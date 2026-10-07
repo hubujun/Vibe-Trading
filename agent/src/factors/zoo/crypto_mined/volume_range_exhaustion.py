@@ -1,34 +1,33 @@
-"""crypto_mined_volume_range_exhaustion: volume range extremes fade return extremes."""
-
-from __future__ import annotations
+"""crypto volume: volume-range exhaustion factor."""
 
 import pandas as pd
 
-from src.factors.base import delta, rank, safe_div, ts_max, ts_min, ts_rank
+from src.factors.base import safe_div, ts_max, ts_min
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_range_exhaustion",
-    "nickname": "Volume Range Exhaustion",
+    "nickname": "量能区间衰竭",
     "theme": ["volume"],
-    "formula_latex": "\\operatorname{rank}\\left(\\operatorname{rank}\\left(\\frac{V - \\operatorname{ts\\_min}(V,20)}{\\operatorname{ts\\_max}(V,20) - \\operatorname{ts\\_min}(V,20) + \\epsilon}\\right) \\times \\left(0.5 - \\operatorname{ts\\_rank}(\\Delta C_1,20)\\right)\\right)",
-    "columns_required": ["close", "volume"],
+    "formula_latex": r"- \frac{V_t}{\max_{30} V} \cdot \frac{C_t - \min_{30} L}{\max_{30} H - \min_{30} L}",
+    "columns_required": ["volume", "close", "high", "low"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 3,
-    "min_warmup_bars": 40,
-    "notes": "Fades recent return extremes when volume is at an extreme of its own 20-bar range.",
+    "decay_horizon": 5,
+    "min_warmup_bars": 30,
+    "notes": "High relative volume near the top of the recent high-low range is faded as exhaustion.",
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Return volume-weighted range-position exhaustion factor."""
     close = panel["close"].astype(float)
+    high = panel["high"].astype(float).reindex(index=close.index, columns=close.columns)
+    low = panel["low"].astype(float).reindex(index=close.index, columns=close.columns)
     volume = panel["volume"].astype(float).reindex(index=close.index, columns=close.columns)
 
-    v_max = ts_max(volume, 20)
-    v_min = ts_min(volume, 20)
-    v_range_pos = safe_div(volume - v_min, v_max - v_min + 1e-12)
+    vol_rel = safe_div(volume, ts_max(volume, 30))
+    hh = ts_max(high, 30)
+    ll = ts_min(low, 30)
+    range_pos = safe_div(close - ll, hh - ll)
 
-    vol_rank = rank(v_range_pos)
-    ret_rank = ts_rank(delta(close, 1), 20)
-
-    return rank(vol_rank * (0.5 - ret_rank))
+    return -vol_rel * range_pos
