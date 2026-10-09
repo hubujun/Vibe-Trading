@@ -1,29 +1,46 @@
-"""crypto VOLUME: volume climax reversal."""
+"""crypto VOLUME: volume-climax reversal after stretched short-horizon moves."""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
-from src.factors.base import delta, safe_div, ts_rank
+from src.factors.base import delta, safe_div, signed_power, ts_rank, zscore
 
 __alpha_meta__ = {
     "id": "crypto_mined_volume_climax_reversal",
-    "nickname": "量峰反转",
+    "nickname": "放量冲高反转",
     "theme": ["volume"],
-    "formula_latex": "- \\mathrm{rank}_{20}(v_t) \\times \\frac{c_t - c_{t-3}}{c_{t-3}}",
+    "formula_latex": (
+        "\\mathrm{zscore}\\!\\left[-\\mathrm{sgn}(r_{5})\\,|r_{5}|^{1/2}\\;"
+        "\\mathrm{ts\\_rank}(V,20)\\right],\\quad r_{5}=\\frac{C_t-C_{t-5}}{C_{t-5}}"
+    ),
     "columns_required": ["close", "volume"],
     "universe": ["crypto"],
     "frequency": ["1d"],
-    "decay_horizon": 3,
-    "min_warmup_bars": 20,
-    "notes": "Negative recent return weighted by time-series volume rank; high-volume selloff may reverse.",
+    "decay_horizon": 5,
+    "min_warmup_bars": 25,
+    "notes": (
+        "Climax-reversal proxy: a 5-bar price move is weighted by how extreme "
+        "current turnover is versus its own 20-bar history. Moves printed on "
+        "top-decile volume are treated as exhaustive and faded; signs are "
+        "inverted so high factor values = expected reversal bounce."
+    ),
 }
 
 
 def compute(panel: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """Return the volume climax reversal factor."""
+    """Return the volume-weighted short-horizon reversal score."""
     close = panel["close"].astype(float)
     volume = panel["volume"].astype(float)
-    volume_rank = ts_rank(volume, 20)
-    ret_3 = safe_div(delta(close, 3), close.shift(3))
-    return -1.0 * volume_rank * ret_3
+
+    # 5-bar return, outlier-compressed by signed square root
+    ret5 = safe_div(delta(close, 5), close.shift(5))
+    stretched = signed_power(ret5, 0.5)
+
+    # how climactic is today's turnover within the recent window
+    vol_rank = ts_rank(volume, 20)
+
+    raw = -stretched * vol_rank
+    out = zscore(raw)
+    return out.where(np.isfinite(out))
